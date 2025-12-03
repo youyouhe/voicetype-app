@@ -1,0 +1,7 @@
+{
+  "name": "Whisper-Input UI",
+  "description": "A high-fidelity implementation of the Whisper-Input Tauri application UI, featuring real-time status visualization, settings management, and responsive design.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
