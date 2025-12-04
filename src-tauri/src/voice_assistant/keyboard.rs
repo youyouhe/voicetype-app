@@ -120,15 +120,16 @@ impl KeyboardManager {
                         InputState::Processing => {
                             // 停止录音并处理转录
                             if let Some(ref mut rec) = recorder {
-                                match rec.stop_recording() {
-                                    Ok(audio_buffer) => {
+                                match rec.stop_recording_with_option(true) { // TODO: Get this from config
+                                    Ok(audio_file_path) => {
                                         let asr_clone = asr_processor.clone();
                                         let state_clone = state.clone();
                                         let temp_len_clone = temp_text_length.clone();
                                         let clipboard_clone = original_clipboard.clone();
 
                                         tokio::spawn(async move {
-                                            match asr_clone.process_audio(audio_buffer, Mode::Transcriptions, "") {
+                                            // 使用 ASR 处理器的 process_audio_file 方法
+                                            match asr_clone.process_audio_file(&audio_file_path, Mode::Transcriptions, "") {
                                                 Ok(text) => {
                                                     Self::type_text_internal(&state_clone, &temp_len_clone, &clipboard_clone, &text, None);
                                                 }
@@ -149,8 +150,8 @@ impl KeyboardManager {
                             // 停止录音并处理翻译
                             if let Some(ref mut rec) = recorder {
                                 if let Some(ref translate_proc) = translate_processor {
-                                    match rec.stop_recording() {
-                                        Ok(audio_buffer) => {
+                                    match rec.stop_recording_with_option(true) { // TODO: Get this from config
+                                        Ok(audio_file_path) => {
                                             let asr_clone = asr_processor.clone();
                                             let translate_clone = translate_proc.clone();
                                             let state_clone = state.clone();
@@ -158,8 +159,8 @@ impl KeyboardManager {
                                             let clipboard_clone = original_clipboard.clone();
 
                                             tokio::spawn(async move {
-                                                // 先转录
-                                                match asr_clone.process_audio(audio_buffer, Mode::Transcriptions, "") {
+                                                // 先使用 ASR 转录
+                                                match asr_clone.process_audio_file(&audio_file_path, Mode::Transcriptions, "") {
                                                     Ok(transcribed) => {
                                                         // 再翻译
                                                         match translate_clone.translate(&transcribed) {
@@ -296,6 +297,31 @@ impl KeyboardManager {
         if let Some(content) = clipboard.take() {
             set_clipboard_content(&content);
         }
+    }
+
+    // 可配置热键方法
+    pub fn set_transcribe_hotkey(&self, hotkey_str: &str) -> Result<(), VoiceError> {
+        let _parsed_hotkey = crate::voice_assistant::hotkey_parser::ParsedHotkey::parse(hotkey_str)
+            .map_err(|e| VoiceError::Other(e))?;
+        // 由于我们使用简单的版本，暂时只打印日志
+        println!("Setting transcribe hotkey: {}", hotkey_str);
+        Ok(())
+    }
+
+    pub fn set_translate_hotkey(&self, hotkey_str: &str) -> Result<(), VoiceError> {
+        let _parsed_hotkey = crate::voice_assistant::hotkey_parser::ParsedHotkey::parse(hotkey_str)
+            .map_err(|e| VoiceError::Other(e))?;
+        // 由于我们使用简单的版本，暂时只打印日志
+        println!("Setting translate hotkey: {}", hotkey_str);
+        Ok(())
+    }
+
+    pub fn set_trigger_delay_ms(&self, delay_ms: i64) {
+        println!("Setting trigger delay: {}ms", delay_ms);
+    }
+
+    pub fn set_anti_mistouch_enabled(&self, enabled: bool) {
+        println!("Setting anti-mistouch: {}", enabled);
     }
 }
 

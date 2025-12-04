@@ -1,6 +1,16 @@
 import { LucideIcon } from 'lucide-react';
 import { ReactNode } from 'react';
 
+// Tauri environment type declarations
+declare global {
+  interface Window {
+    __TAURI_INTERNALS__?: {
+      platform: string;
+      version: string;
+    };
+  }
+}
+
 export enum AppStatus {
   Idle = 'idle',
   Recording = 'recording',
@@ -27,6 +37,7 @@ export interface ServiceOptionProps {
   icon: ReactNode;
   selected: boolean;
   onSelect: () => void;
+  disabled?: boolean;
 }
 
 export interface MetricData {
@@ -39,4 +50,23 @@ export interface HistoryItem {
   type: 'transcribe' | 'translate';
   text: string;
   timestamp: number;
+}
+
+export interface HotkeyConfig {
+  id: string;
+  transcribe_key: string;
+  translate_key: string;
+  trigger_delay_ms: number;
+  anti_mistouch_enabled: boolean;
+  save_wav_files: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HotkeyConfigRequest {
+  transcribe_key: string;
+  translate_key: string;
+  trigger_delay_ms: number;
+  anti_mistouch_enabled: boolean;
+  save_wav_files: boolean;
 }
