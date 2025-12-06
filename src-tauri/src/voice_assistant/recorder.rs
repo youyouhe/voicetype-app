@@ -14,6 +14,7 @@ pub struct AudioRecorder {
     stream: Option<Stream>,
     save_wav_files: bool,
     _host: Host,
+    recording_audio_data: Option<std::sync::Arc<std::sync::Mutex<Vec<f32>>>>,
 }
 
 impl AudioRecorder {
@@ -37,6 +38,7 @@ impl AudioRecorder {
             stream: None,
             save_wav_files: true, // Default to true
             _host: host,
+            recording_audio_data: None,
         })
     }
 
@@ -60,6 +62,9 @@ impl AudioRecorder {
             sample_rate,
             buffer_size: cpal::BufferSize::Default,
         };
+        
+        println!("🎙️ Stream Config: channels={}, sample_rate={:?}, sample_format={:?}", 
+            channels, sample_rate, config.sample_format());
 
         println!("Starting recording on device: {:?}, config: {:?}", device.name(), config);
 
@@ -114,6 +119,9 @@ impl AudioRecorder {
             buffer.clear();
         }
 
+        // Store the Arc to the audio data so we can retrieve it later
+        self.recording_audio_data = Some(audio_data.clone());
+
         stream.play().map_err(|e| VoiceError::Audio(format!("Failed to play stream: {}", e)))?;
 
         self.stream = Some(stream);
@@ -147,10 +155,23 @@ impl AudioRecorder {
             return Err(VoiceError::TooShort);
         }
 
-        println!("Recording duration: {:.2}s, samples: {}", duration, self.audio_data.len());
+        // Get the actual audio data for saving
+        let (recorded_samples, audio_samples) = if let Some(audio_data_arc) = self.recording_audio_data.take() {
+            if let Ok(buffer) = audio_data_arc.lock() {
+                let sample_count = buffer.len();
+                let samples = buffer.clone();
+                (sample_count, samples)
+            } else {
+                (0, Vec::new())
+            }
+        } else {
+            (0, Vec::new())
+        };
+
+        println!("Recording duration: {:.2}s, samples: {}", duration, recorded_samples);
 
         // Save audio to file
-        let file_path = self.save_audio_to_file(&self.audio_data)?;
+        let file_path = self.save_audio_to_file(&audio_samples)?;
         self.audio_data.clear();
 
         println!("Audio saved to: {}", file_path);
@@ -158,12 +179,16 @@ impl AudioRecorder {
     }
 
     fn audio_to_wav(&self, samples: &[f32]) -> Result<Vec<u8>, VoiceError> {
+        // 🎯 保存为2通道，匹配你的模拟文件格式
         let spec = WavSpec {
-            channels: 1,
+            channels: 2, // 2通道，与你的模拟文件一致
             sample_rate: self.sample_rate,
-            bits_per_sample: 16,
+            bits_per_sample: 16, // 16位有符号整数 (s16le)
             sample_format: hound::SampleFormat::Int,
         };
+        
+        println!("🎵 WAV Spec: channels={}, sample_rate={}, bits_per_sample={}", 
+            spec.channels, spec.sample_rate, spec.bits_per_sample);
 
         let mut cursor = Cursor::new(Vec::new());
         {
@@ -176,6 +201,8 @@ impl AudioRecorder {
                     .map_err(|e| VoiceError::Audio(format!("Failed to write sample: {}", e)))?;
             }
         }
+        
+        println!("💾 WAV file created: {} samples, {} bytes", samples.len(), cursor.get_ref().len());
 
         let wav_bytes = cursor.into_inner();
         Ok(wav_bytes)
@@ -203,20 +230,26 @@ impl AudioRecorder {
             .map_err(|e| VoiceError::Audio(format!("Failed to write audio file: {}", e)))?;
         
         println!("✅ Audio saved successfully: {}", file_path.display());
+        
+        // 验证保存的WAV文件格式
+        if let Err(e) = self.verify_wav_file_format(&file_path.to_string_lossy()) {
+            println!("⚠️ Failed to verify WAV file: {}", e);
+        }
+        
         Ok(file_path.to_string_lossy().to_string())
     }
     
     fn get_audio_directory(&self) -> Result<PathBuf, VoiceError> {
         let mut audio_dir = std::env::current_dir()
             .map_err(|e| VoiceError::Audio(format!("Failed to get current directory: {}", e)))?;
-        
-        audio_dir.push("data");
+
+        audio_dir.push(".tauri-data");
         audio_dir.push("audio");
-        
+
         // Create directory if it doesn't exist
         std::fs::create_dir_all(&audio_dir)
             .map_err(|e| VoiceError::Audio(format!("Failed to create audio directory: {}", e)))?;
-        
+
         println!("📁 Audio directory: {}", audio_dir.display());
         Ok(audio_dir)
     }
@@ -254,20 +287,93 @@ impl AudioRecorder {
 
         println!("Recording duration: {:.2}s, samples: {}", duration, self.audio_data.len());
 
+        // Get the actual audio data from recording buffer
+        let (recorded_samples, audio_samples) = if let Some(audio_data_arc) = self.recording_audio_data.take() {
+            if let Ok(buffer) = audio_data_arc.lock() {
+                let sample_count = buffer.len();
+                let samples = buffer.clone();
+                (sample_count, samples)
+            } else {
+                (0, Vec::new())
+            }
+        } else {
+            (0, Vec::new())
+        };
+
+        println!("Recording duration: {:.2}s, samples: {}", duration, recorded_samples);
+
         if save_to_file {
             // Save audio to file
-            let file_path = self.save_audio_to_file(&self.audio_data)?;
-            self.audio_data.clear();
-            println!("Audio saved to: {}", file_path);
+            let file_path = self.save_audio_to_file(&audio_samples)?;
+            println!("✅ Audio saved to: {}", file_path);
             Ok(file_path)
         } else {
-            // Don't save file, create temporary file for processing and clean up afterwards
-            let temp_file_path = self.save_audio_to_file(&self.audio_data)?;
-            // Note: We'll need to clean up this temp file after processing
-            self.audio_data.clear();
-            println!("Temporary audio created for processing: {}", temp_file_path);
-            Ok(temp_file_path)
+            // Don't save file, but provide audio data for processing
+            println!("⏭️ Skipping file save (Save WAV Files = false)");
+            // Return a placeholder path to indicate successful recording without file save
+            Ok(format!("memory://audio_data_{}_samples", recorded_samples))
         }
+    }
+
+    pub fn get_audio_data(&self) -> Vec<f32> {
+        // Get audio data from the recording buffer
+        if let Some(audio_data_arc) = &self.recording_audio_data {
+            if let Ok(buffer) = audio_data_arc.lock() {
+                return buffer.clone();
+            }
+        }
+        // Fallback to internal audio_data
+        self.audio_data.clone()
+    }
+
+    pub fn get_sample_rate(&self) -> u32 {
+        self.sample_rate
+    }
+
+    /// 验证WAV文件格式 - 用于调试
+    pub fn verify_wav_file_format(&self, file_path: &str) -> Result<(), VoiceError> {
+        use std::fs::File;
+        use std::io::BufReader;
+        
+        let file = File::open(file_path)
+            .map_err(|e| VoiceError::Audio(format!("Failed to open WAV file: {}", e)))?;
+        let mut reader = BufReader::new(file);
+        
+        // 使用hound读取WAV头信息
+        let wav_reader = hound::WavReader::new(&mut reader)
+            .map_err(|e| VoiceError::Audio(format!("Failed to read WAV header: {}", e)))?;
+        
+        let spec = wav_reader.spec();
+        let duration = wav_reader.duration();
+        
+        println!("🔍 WAV File Verification:");
+        println!("  📁 Path: {}", file_path);
+        println!("  🎵 Channels: {}", spec.channels);
+        println!("  🔢 Sample Rate: {}", spec.sample_rate);
+        println!("  🔢 Bits per sample: {}", spec.bits_per_sample);
+        println!("  🔢 Sample format: {:?}", spec.sample_format);
+        println!("  ⏱️ Duration: {} samples ({:.2} seconds)", 
+            duration, duration as f64 / spec.sample_rate as f64);
+        println!("  📊 Expected format: (44100 Hz, 2ch, s16le) - Your simulation file");
+        println!("  📊 Original system: (44100 Hz, 1ch, s16le)");
+        println!("  📊 Actual format:   ({} Hz, {}ch, s{:?})", 
+            spec.sample_rate, spec.channels, spec.bits_per_sample);
+        
+        // 验证是否符合你的模拟文件格式
+        let correct_sample_rate = spec.sample_rate == 44100;
+        let correct_channels = spec.channels == 2; // 你的模拟文件使用2通道
+        let correct_bits = spec.bits_per_sample == 16;
+        
+        if correct_sample_rate && correct_channels && correct_bits {
+            println!("  ✅ Format matches your simulation file (44100 Hz, 2ch, s16le)");
+        } else {
+            println!("  ⚠️ Format mismatch detected!");
+            if spec.channels == 1 {
+                println!("  💡 Note: Original system used mono (1ch), now using stereo (2ch)");
+            }
+        }
+        
+        Ok(())
     }
 }
 
