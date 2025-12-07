@@ -28,84 +28,33 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
   // Debug logging
   console.log('🎤 VoiceAssistantPanel - externalIsRunning:', externalIsRunning);
   console.log('🎤 VoiceAssistantPanel - final isRunning:', isRunning);
-  const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
-  const [testResults, setTestResults] = useState<string[]>([]);
-
-  useEffect(() => {
-    loadSystemInfo();
-  }, []);
-
-  const loadSystemInfo = async () => {
-    try {
-      const info = await TauriService.getSystemInfo();
-      setSystemInfo(info);
-    } catch (error) {
-      console.error('Failed to load system info:', error);
-    }
-  };
+  
 
   const startVoiceAssistant = async () => {
     try {
-      addTestResult('🚀 Starting Voice Assistant...');
       const result = await TauriService.startVoiceAssistant();
-      addTestResult('✅ ' + result, 'success');
-      // Optimistically set to true, but let polling handle the real state
+      console.log('Voice Assistant started:', result);
+      // Optimistically set to true, but let events handle the real state
       if (onStatusChange) {
         onStatusChange(true);
       }
     } catch (error) {
-      addTestResult('❌ Failed to start: ' + error, 'error');
+      console.error('Failed to start Voice Assistant:', error);
       setIsRunning(false);
     }
   };
 
   const stopVoiceAssistant = async () => {
     try {
-      addTestResult('⏹️ Stopping Voice Assistant...');
       const result = await TauriService.stopVoiceAssistant();
-      addTestResult('📴 ' + result, 'info');
-      // Optimistically set to false, but let polling handle the real state
+      console.log('Voice Assistant stopped:', result);
+      // Optimistically set to false, but let events handle the real state
       if (onStatusChange) {
         onStatusChange(false);
       }
     } catch (error) {
-      addTestResult('❌ Failed to stop: ' + error, 'error');
+      console.error('Failed to stop Voice Assistant:', error);
     }
-  };
-
-  const testASR = async (processor: 'cloud' | 'local') => {
-    try {
-      addTestResult(`🧪 Testing ${processor} ASR...`);
-      const result = await TauriService.testASR(processor);
-      addTestResult('✅ ASR Test: ' + result, 'success');
-    } catch (error) {
-      addTestResult('❌ ASR Test Failed: ' + error, 'error');
-    }
-  };
-
-  const testTranslation = async (translator: 'siliconflow' | 'ollama') => {
-    try {
-      addTestResult(`🧪 Testing ${translator} translation...`);
-      const result = await TauriService.testTranslation(translator);
-      addTestResult('✅ Translation Test: ' + result, 'success');
-    } catch (error) {
-      addTestResult('❌ Translation Test Failed: ' + error, 'error');
-    }
-  };
-
-  const addTestResult = (message: string, type?: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const result = `[${timestamp}] ${message}`;
-    setTestResults(prev => [...prev, result]);
-
-    // Keep only last 100 results (increase limit and prevent auto-clear)
-    if (testResults.length > 100) {
-      setTestResults(prev => prev.slice(-100));
-    }
-  };
-
-  const clearResults = () => {
-    setTestResults([]);
   };
 
   return (
@@ -134,99 +83,7 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
         </div>
       </div>
 
-      {/* Test Buttons */}
-      <div className="mb-6">
-        <h4 className="text-sm font-semibold text-gray-700 mb-3">🧪 Test Processors</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => testASR('cloud')}
-            className="justify-start"
-          >
-            ☁️ Test Cloud ASR
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => testASR('local')}
-            className="justify-start"
-          >
-            🏠 Test Local ASR
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => testTranslation('siliconflow')}
-            className="justify-start"
-          >
-            🌐 Test SiliconFlow
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => testTranslation('ollama')}
-            className="justify-start"
-          >
-            🦙 Test Ollama
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={clearResults}
-            className="justify-start text-red-500 hover:bg-red-50"
-          >
-            🗑️ Clear Results
-          </Button>
-        </div>
-      </div>
-
-      {/* Test Results */}
-      {testResults.length > 0 && (
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-sm font-semibold text-gray-700">📋 Test Results ({testResults.length})</h4>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={clearResults}
-              className="text-xs text-red-500 hover:bg-red-50"
-            >
-              🗑️ Clear All
-            </Button>
-          </div>
-          <div className="bg-gray-900 text-green-400 rounded-lg p-3 max-h-64 overflow-y-auto border border-gray-700">
-            {testResults.map((result, index) => (
-              <div key={index} className="text-xs font-mono mb-1 break-all leading-relaxed">
-                {result}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* System Information */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h4 className="text-sm font-semibold text-gray-700">💻 System Information</h4>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={loadSystemInfo}
-            className="text-xs"
-          >
-            🔄 Refresh
-          </Button>
-        </div>
-        <div className="bg-gray-50 rounded-lg p-3">
-          {Object.entries(systemInfo).map(([key, value]) => (
-            <div key={key} className="flex justify-between text-sm mb-1">
-              <span className="font-medium text-gray-600">{key}:</span>
-              <span className="text-gray-800 font-mono text-xs">{value}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+  
     </div>
   );
 };
