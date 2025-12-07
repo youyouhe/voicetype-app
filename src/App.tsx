@@ -234,7 +234,7 @@ const App: React.FC = () => {
              <Mic className="w-5 h-5 text-primary-600" />
           </div>
           <div>
-            <h1 className="text-lg font-bold text-gray-900 leading-none">Whisper-Input</h1>
+            <h1 className="text-lg font-bold text-gray-900 leading-none">Flash-Input</h1>
             <p className="text-xs text-gray-500 mt-0.5">Tauri Client v1.0.0</p>
           </div>
           <div className="hidden sm:block h-6 w-px bg-gray-200 mx-2" />
