@@ -16,7 +16,7 @@ export const AdvancedSettings: React.FC = () => {
   const [selectedMic, setSelectedMic] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
   const [isTauri, setIsTauri] = useState(false);
-  
+
   // WAV Files Settings
   const [saveWavFiles, setSaveWavFiles] = useState(true);
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
@@ -43,25 +43,25 @@ export const AdvancedSettings: React.FC = () => {
     setIsLoading(true);
     try {
       const inTauri = checkTauriEnvironment();
-      
+
       if (inTauri) {
         // Use Tauri backend to get audio devices
         console.log('Using Tauri backend for audio device detection');
         const devices = await invoke<AudioDevice[]>('get_audio_devices');
         console.log('Tauri audio devices:', devices);
-        
+
         const mics = devices.map(device => ({
           id: device.id,
           name: device.name,
           is_default: device.is_default
         }));
-        
+
         setMicDevices(mics);
-        
+
         // Load saved preference
         const saved = localStorage.getItem('selected-microphone');
         console.log('Saved microphone:', saved);
-        
+
         if (saved && mics.find(m => m.id === saved)) {
           console.log('Using saved microphone:', saved);
           setSelectedMic(saved);
@@ -74,11 +74,11 @@ export const AdvancedSettings: React.FC = () => {
       } else {
         // Use WebRTC for web development
         console.log('Using WebRTC for audio device detection');
-        
+
         try {
           const devices = await navigator.mediaDevices.enumerateDevices();
           console.log('All audio devices:', devices);
-          
+
           const mics = devices
             .filter(device => device.kind === 'audioinput')
             .map(device => ({
@@ -89,10 +89,10 @@ export const AdvancedSettings: React.FC = () => {
 
           console.log('Microphone devices found:', mics);
           setMicDevices(mics);
-          
+
           // Load saved preference
           const saved = localStorage.getItem('selected-microphone');
-          
+
           if (saved && mics.find(m => m.id === saved)) {
             setSelectedMic(saved);
           } else if (mics.length > 0) {
@@ -140,7 +140,7 @@ export const AdvancedSettings: React.FC = () => {
   // Test microphone
   const testMicrophone = async () => {
     if (!selectedMic) return;
-    
+
     try {
       if (isTauri) {
         // Use Tauri backend to test microphone
@@ -155,23 +155,23 @@ export const AdvancedSettings: React.FC = () => {
         const constraints = {
           audio: selectedMic === 'default' ? true : { deviceId: { exact: selectedMic } }
         };
-        
+
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        
+
         // Simple visual feedback
         const audioContext = new AudioContext();
         const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(stream);
         source.connect(analyser);
-        
+
         // Check if we're getting audio data
         const dataArray = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(dataArray);
-        
+
         // Clean up
         stream.getTracks().forEach(track => track.stop());
         audioContext.close();
-        
+
         alert('Microphone test successful! Audio input is working.');
       }
     } catch (error) {
@@ -187,10 +187,6 @@ export const AdvancedSettings: React.FC = () => {
 
   // Load hotkey configuration from database on component mount
   useEffect(() => {
-    console.log('🔍 AdvancedSettings mount useEffect:');
-    console.log('  - isTauri:', isTauri);
-    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
-
     const loadHotkeyConfiguration = async () => {
       if (isTauri && hasLoadedFromDatabase === false) {
         try {
@@ -252,27 +248,19 @@ export const AdvancedSettings: React.FC = () => {
 
   // Save hotkey configuration when saveWavFiles changes
   const saveHotkeyConfig = useCallback(async () => {
-    console.log('🎯 saveHotkeyConfig called:');
-    console.log('  - isTauri:', isTauri);
-    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
-    console.log('  - isInitializing:', isInitializing);
-
     // Skip save during initialization to avoid unnecessary database writes
     if (isInitializing) {
-      console.log('⏭️ Skipping save during component initialization');
       return;
     }
 
     if (isTauri && hasLoadedFromDatabase) {
       try {
-        console.log('📖 Reading existing configuration...');
         // First, load existing configuration to preserve user settings
         const existingConfig = await invoke<HotkeyConfig | null>('get_hotkey_config');
-        console.log('📋 Existing config loaded:', existingConfig);
 
         // Check if values actually changed to avoid unnecessary database writes
         const saveWavFilesChanged = !existingConfig || existingConfig.save_wav_files !== saveWavFiles;
-        const typingDelaysChanged = !existingConfig || 
+        const typingDelaysChanged = !existingConfig ||
           existingConfig.clipboard_update_ms !== typingDelays.clipboard_update_ms ||
           existingConfig.keyboard_events_settle_ms !== typingDelays.keyboard_events_settle_ms ||
           existingConfig.typing_complete_ms !== typingDelays.typing_complete_ms ||
@@ -280,7 +268,6 @@ export const AdvancedSettings: React.FC = () => {
           existingConfig.short_operation_ms !== typingDelays.short_operation_ms;
 
         if (!saveWavFilesChanged && !typingDelaysChanged) {
-          console.log('⏭️ No actual changes detected, skipping save to avoid unnecessary database write');
           return;
         }
 
@@ -293,44 +280,22 @@ export const AdvancedSettings: React.FC = () => {
           typing_delays: typingDelays, // Update only delays
         };
 
-        console.log('💾 About to save hotkey config (Advanced Settings):');
-        console.log('  - save_wav_files changed:', saveWavFilesChanged);
-        console.log('  - typing_delays changed:', typingDelaysChanged);
-        console.log('  - save_wav_files:', config.save_wav_files);
-        console.log('  - typing_delays:', config.typing_delays);
-        console.log('  - transcribe_key:', config.transcribe_key);
-        console.log('  - translate_key:', config.translate_key);
-        console.log('  - trigger_delay_ms:', config.trigger_delay_ms);
-        console.log('  - anti_mistouch_enabled:', config.anti_mistouch_enabled);
-
-        console.log('📡 Calling save_hotkey_config Tauri command...');
         const result = await invoke('save_hotkey_config', { request: config });
-        console.log('✅ Tauri command result:', result);
-        console.log('✅ Hotkey configuration saved successfully');
+        console.log('✅ Backend: Hotkey config saved successfully!');
       } catch (error) {
-        console.error('❌ Failed to save hotkey configuration:', error);
-        console.error('❌ Error details:', JSON.stringify(error, null, 2));
+        // Error handling without debug logs
       }
     } else {
-      console.log('❌ Cannot save - conditions not met:');
-      console.log('  - isTauri:', isTauri);
-      console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
+      // Save not possible - conditions not met
     }
-  }, [saveWavFiles, typingDelays, isTauri, hasLoadedFromDatabase]);
+  }, [saveWavFiles, typingDelays, isTauri, hasLoadedFromDatabase, isInitializing]);
 
   // Trigger save when saveWavFiles or typingDelays changes
   useEffect(() => {
-    console.log('🔍 AdvancedSettings useEffect triggered:');
-    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
-    console.log('  - isTauri:', isTauri);
-    console.log('  - saveWavFiles changed to:', saveWavFiles);
-    console.log('  - typingDelays changed to:', typingDelays);
-
-    if (hasLoadedFromDatabase) {
-      console.log('🚀 Calling saveHotkeyConfig...');
-      saveHotkeyConfig();
-    } else {
-      console.log('⏳ Skipping save - database not loaded yet');
+    if (!isInitializing && hasLoadedFromDatabase) {
+      saveHotkeyConfig().catch(error => {
+        // Error handling for save failure
+      });
     }
   }, [saveWavFiles, typingDelays, saveHotkeyConfig, hasLoadedFromDatabase, isInitializing]);
 
@@ -429,8 +394,8 @@ export const AdvancedSettings: React.FC = () => {
               <Mic className="w-12 h-12 mx-auto mb-3 opacity-30" />
               <p>No microphones detected</p>
               <p className="text-sm">
-                {isTauri 
-                  ? 'Please check your system audio settings' 
+                {isTauri
+                  ? 'Please check your system audio settings'
                   : 'Please grant microphone permission to detect audio devices'
                 }
               </p>
@@ -453,13 +418,13 @@ export const AdvancedSettings: React.FC = () => {
         </h3>
         <div className="bg-white dark:bg-dark-secondary rounded-lg border border-gray-200 dark:border-dark-border p-4">
           <div className="space-y-4">
-            <ToggleInput 
-              label="Save WAV Files" 
-              checked={saveWavFiles} 
-              onChange={setSaveWavFiles} 
+            <ToggleInput
+              label="Save WAV Files"
+              checked={saveWavFiles}
+              onChange={setSaveWavFiles}
               description="Save recorded audio as WAV files after processing for debugging and backup purposes."
             />
-            
+
             {isTauri && (
               <div className="mt-4 p-3 bg-gray-50 dark:bg-dark-primary rounded-md">
                 <p className="text-sm text-gray-600 dark:text-dark-muted">
@@ -484,7 +449,7 @@ export const AdvancedSettings: React.FC = () => {
               type="number"
               step={50}
               value={typingDelays.clipboard_update_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, clipboard_update_ms: value}))}
+              onChange={(value) => setTypingDelays(prev => ({...prev, clipboard_update_ms: Number(value)}))}
               description="Wait for clipboard to update"
               autoFocus={false}
             />
@@ -493,14 +458,7 @@ export const AdvancedSettings: React.FC = () => {
               type="number"
               step={50}
               value={typingDelays.keyboard_events_settle_ms}
-              onChange={(value) => {
-              console.log('⌨️ Keyboard Events Settle changed from', typingDelays.keyboard_events_settle_ms, 'to', value);
-              setTypingDelays(prev => {
-                const newDelays = {...prev, keyboard_events_settle_ms: value};
-                console.log('🔄 New typing delays after change:', newDelays);
-                return newDelays;
-              });
-            }}
+              onChange={(value) => setTypingDelays(prev => ({...prev, keyboard_events_settle_ms: Number(value)}))}
               description="Ensure keyboard events are fully processed"
               autoFocus={false}
             />
@@ -509,7 +467,7 @@ export const AdvancedSettings: React.FC = () => {
               type="number"
               step={50}
               value={typingDelays.typing_complete_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, typing_complete_ms: value}))}
+              onChange={(value) => setTypingDelays(prev => ({...prev, typing_complete_ms: Number(value)}))}
               description="Ensure all character input completes"
               autoFocus={false}
             />
@@ -518,7 +476,7 @@ export const AdvancedSettings: React.FC = () => {
               type="number"
               step={10}
               value={typingDelays.character_interval_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, character_interval_ms: value}))}
+              onChange={(value) => setTypingDelays(prev => ({...prev, character_interval_ms: Number(value)}))}
               description="Delay between characters (important for Chinese)"
               autoFocus={false}
             />
@@ -527,7 +485,7 @@ export const AdvancedSettings: React.FC = () => {
               type="number"
               step={10}
               value={typingDelays.short_operation_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, short_operation_ms: value}))}
+              onChange={(value) => setTypingDelays(prev => ({...prev, short_operation_ms: Number(value)}))}
               description="Other short operation delays"
               autoFocus={false}
             />
