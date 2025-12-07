@@ -1,8 +1,9 @@
-use crate::database::{Database, NewHistoryRecord};
+use crate::database::{Database, NewHistoryRecord, ServiceStats, LatencyRecord, UsageLog};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::{DateTime, Utc};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {
@@ -18,11 +19,41 @@ pub struct HealthCheckRequest {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthCheckResponse {
-    pub success: bool,
-    pub message: String,
-    pub status_code: Option<u16>,
+    pub endpoint: String,
+    pub healthy: bool,
     pub response_time_ms: u64,
-    pub backend_count: Option<usize>,
+    pub status_code: Option<u16>,
+    pub message: String,
+    pub timestamp: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ServiceStatusResponse {
+    pub active_service: String,
+    pub status: String,
+    pub endpoint: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatencyDataResponse {
+    pub current: i64,
+    pub trend: String,
+    pub trend_value: i64,
+    pub history: Vec<LatencyHistoryPoint>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LatencyHistoryPoint {
+    pub time: String,
+    pub val: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UsageDataResponse {
+    pub today_minutes: i64,
+    pub success_rate: f64,
+    pub total_requests: i64,
+    pub successful_requests: i64,
 }
 
 // Global database state
@@ -89,13 +120,31 @@ pub struct HotkeyConfigRequest {
 pub async fn init_database(
     db_state: State<'_, DatabaseState>
 ) -> Result<String, String> {
+    println!("🚀 Backend: init_database() called");
+
+    // Check if database is already initialized
+    {
+        println!("🔍 Backend: Checking if database already exists...");
+        let guard = db_state.lock().unwrap();
+        if guard.is_some() {
+            println!("✅ Backend: Database already exists, skipping initialization");
+            return Ok("Database already initialized".to_string());
+        }
+        println!("🔍 Backend: No existing database found, proceeding with initialization");
+    }
+
+    println!("🔍 Backend: Attempting to create new Database instance...");
     match Database::new().await {
         Ok(db) => {
+            println!("✅ Backend: Database created successfully, storing in state");
             *db_state.lock().unwrap() = Some(db);
+            println!("✅ Backend: Database initialized and stored in state");
             Ok("Database initialized successfully".to_string())
         }
         Err(e) => {
-            eprintln!("Failed to initialize database: {}", e);
+            eprintln!("❌ Backend: Failed to initialize database: {}", e);
+            println!("❌ Backend: Database initialization error details:");
+            println!("  - Error: {}", e);
             Err(format!("Failed to initialize database: {}", e))
         }
     }
@@ -106,19 +155,46 @@ pub async fn init_database(
 pub async fn get_asr_config(
     db_state: State<'_, DatabaseState>
 ) -> Result<Option<crate::database::AsrConfig>, String> {
+    println!("🔍 Backend: get_asr_config() called");
+    
     let db = {
+        println!("🔒 Backend: Acquiring database lock...");
         let guard = db_state.lock().unwrap();
-        guard.as_ref().cloned()
+        let db_ref = guard.as_ref().cloned();
+        println!("🔓 Backend: Database lock released, database exists: {}", db_ref.is_some());
+        db_ref
     };
 
     match db {
         Some(database) => {
+            println!("✅ Backend: Database found, querying ASR config...");
             match database.get_asr_config().await {
-                Ok(config) => Ok(config),
-                Err(e) => Err(format!("Failed to get ASR config: {}", e)),
+                Ok(config) => {
+                    if let Some(ref cfg) = config {
+                        println!("✅ Backend: ASR config found:");
+                        println!("  - ID: {}", cfg.id);
+                        println!("  - Service Provider: {}", cfg.service_provider);
+                        println!("  - Has Local Endpoint: {}", cfg.local_endpoint.is_some());
+                        println!("  - Has Local API Key: {}", cfg.local_api_key.is_some());
+                        println!("  - Has Cloud Endpoint: {}", cfg.cloud_endpoint.is_some());
+                        println!("  - Has Cloud API Key: {}", cfg.cloud_api_key.is_some());
+                        println!("  - Created At: {}", cfg.created_at);
+                        println!("  - Updated At: {}", cfg.updated_at);
+                    } else {
+                        println!("📥 Backend: No ASR config found in database");
+                    }
+                    Ok(config)
+                },
+                Err(e) => {
+                    println!("❌ Backend: Database query failed: {}", e);
+                    Err(format!("Failed to get ASR config: {}", e))
+                },
             }
         }
-        None => Err("Database not initialized".to_string()),
+        None => {
+            println!("❌ Backend: Database not initialized");
+            Err("Database not initialized".to_string())
+        },
     }
 }
 
@@ -304,6 +380,13 @@ pub async fn cleanup_old_records(
     }
 }
 
+// Simple test command to verify frontend-backend connection
+#[tauri::command]
+pub async fn test_frontend_backend_connection() -> Result<String, String> {
+    println!("🔔 Backend: Frontend-backend connection test received!");
+    Ok("Backend connection successful!".to_string())
+}
+
 // Health check command - performed by Rust backend for better debugging
 #[tauri::command]
 pub async fn test_connection_health(
@@ -311,6 +394,7 @@ pub async fn test_connection_health(
 ) -> Result<HealthCheckResponse, String> {
     println!("🔍 Tauri Backend: Starting health check for: {}", request.endpoint);
     println!("⏰ Current time: {:?}", chrono::Utc::now());
+    println!("📋 Request details: {:?}", request);
 
     // Build health endpoint URL
     // Handle different endpoint formats:
@@ -351,11 +435,12 @@ pub async fn test_connection_health(
             println!("❌ HTTP request failed: {}", e);
             let response_time = start_time.elapsed().as_millis() as u64;
             return Ok(HealthCheckResponse {
-                success: false,
+                endpoint: request.endpoint,
+                healthy: false,
                 message: format!("Network error: {}", e),
                 status_code: None,
                 response_time_ms: response_time,
-                backend_count: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
             });
         }
     };
@@ -391,11 +476,12 @@ pub async fn test_connection_health(
                         println!("📈 Total backends: {}", count);
                     }
                     return Ok(HealthCheckResponse {
-                        success: true,
+                        endpoint: request.endpoint,
+                        healthy: true,
                         message: format!("Service healthy - {} backends", backend_count.unwrap_or(0)),
                         status_code: Some(status_code.as_u16()),
                         response_time_ms: response_time,
-                        backend_count,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
                     });
                 } else {
                     let service_status = json_data.get("status")
@@ -403,11 +489,12 @@ pub async fn test_connection_health(
                         .unwrap_or("unknown");
                     println!("⚠️ Service status: {}", service_status);
                     return Ok(HealthCheckResponse {
-                        success: false,
+                        endpoint: request.endpoint,
+                        healthy: false,
                         message: format!("Service status: {}", service_status),
                         status_code: Some(status_code.as_u16()),
                         response_time_ms: response_time,
-                        backend_count,
+                        timestamp: chrono::Utc::now().to_rfc3339(),
                     });
                 }
             }
@@ -415,11 +502,12 @@ pub async fn test_connection_health(
                 println!("❌ Failed to parse JSON: {}", e);
                 println!("📄 Raw response: {}", response_body);
                 Ok(HealthCheckResponse {
-                    success: false,
+                    endpoint: request.endpoint,
+                    healthy: false,
                     message: format!("Invalid JSON response: {}", e),
                     status_code: Some(status_code.as_u16()),
                     response_time_ms: response_time,
-                    backend_count: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
                 })
             }
         }
@@ -427,11 +515,12 @@ pub async fn test_connection_health(
         let error_text = response.text().await.unwrap_or_default();
         println!("❌ HTTP error response: {}", error_text);
         Ok(HealthCheckResponse {
-            success: false,
+            endpoint: request.endpoint,
+            healthy: false,
             message: format!("HTTP {} - {}", status_code, error_text),
             status_code: Some(status_code.as_u16()),
             response_time_ms: response_time,
-            backend_count: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
         })
     }
 }
@@ -941,4 +1030,275 @@ pub async fn test_microphone(device_id: String) -> Result<bool, String> {
     println!("⏰ Test completed at: {:?}", std::time::SystemTime::now());
     
     Ok(success)
+}
+
+/// Helper function to get hotkey config from database for internal use
+pub async fn get_hotkey_config_from_database() -> Result<Option<crate::database::HotkeyConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        return Ok(None);
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_hotkey_config().await {
+                Ok(config) => Ok(config),
+                Err(e) => Err(format!("Failed to get hotkey config: {}", e)),
+            }
+        }
+        Err(e) => Err(format!("Failed to create database: {}", e)),
+    }
+}
+
+// Internal functions for VoiceAssistant (without Tauri State parameter)
+pub async fn get_asr_config_internal() -> Result<Vec<crate::database::AsrConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        println!("⚠️ Database file not found at: {:?}", database_path);
+        return Ok(Vec::new());
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_asr_config().await {
+                Ok(configs) => {
+                    if let Some(ref config) = configs {
+                        println!("✅ Found ASR config: {} (local: {}, cloud: {})",
+                            config.service_provider,
+                            config.local_endpoint.is_some(),
+                            config.cloud_endpoint.is_some());
+                        Ok(vec![config.clone()])
+                    } else {
+                        println!("⚠️ No ASR config found in database");
+                        Ok(Vec::new())
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Failed to get ASR config: {}", e);
+                    Err(format!("Failed to get ASR config: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to create database: {}", e);
+            Err(format!("Failed to create database: {}", e))
+        }
+    }
+}
+
+pub async fn get_translation_config_internal() -> Result<Vec<crate::database::TranslationConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        println!("⚠️ Database file not found at: {:?}", database_path);
+        return Ok(Vec::new());
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_translation_config("siliconflow").await {
+                Ok(config) => {
+                    if let Some(ref c) = config {
+                        println!("✅ Found translation config: {} ({})", c.provider, c.endpoint.is_some());
+                        Ok(vec![c.clone()])
+                    } else {
+                        println!("⚠️ No translation config found in database");
+                        Ok(Vec::new())
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Failed to get translation config: {}", e);
+                    Err(format!("Failed to get translation config: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to create database: {}", e);
+            Err(format!("Failed to create database: {}", e))
+        }
+    }
+}
+
+// Live Data commands
+#[tauri::command]
+pub async fn get_service_status(
+    service_name: Option<String>,
+    db_state: State<'DatabaseState'>
+) -> Result<ServiceStatusResponse, String> {
+    let db = {
+        let guard = db_state.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    match db {
+        Some(database) => {
+            let service = service_name.unwrap_or_else(|| "local_asr".to_string());
+            println!("🔍 Getting service status for: {}", service);
+
+            match database.get_service_status(&service).await {
+                Some(stats) => {
+                    println!("✅ Service status found: {} ({})", stats.service_name, stats.status);
+                    Ok(ServiceStatusResponse {
+                        active_service: stats.service_name,
+                        status: stats.status,
+                        endpoint: stats.endpoint,
+                    })
+                }
+                None => {
+                    // Return default status if not found
+                    println!("⚠️ No service status found, returning default");
+                    Ok(ServiceStatusResponse {
+                        active_service: service,
+                        status: "offline".to_string(),
+                        endpoint: None,
+                    })
+                }
+            }
+        }
+        None => Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn get_latency_data(
+    service_name: Option<String>,
+    db_state: State<'DatabaseState'>
+) -> Result<LatencyDataResponse, String> {
+    let db = {
+        let guard = db_state.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    match db {
+        Some(database) => {
+            let service = service_name.unwrap_or_else(|| "local_asr".to_string());
+            println!("🔍 Getting latency data for: {}", service);
+
+            match database.get_latency_data(&service, 24).await { // Last 24 hours
+                Ok(records) => {
+                    if records.is_empty() {
+                        println!("⚠️ No latency data found");
+                        return Ok(LatencyDataResponse {
+                            current: 0,
+                            trend: "neutral".to_string(),
+                            trend_value: 0,
+                            history: vec![],
+                        });
+                    }
+
+                    // Calculate current average latency (last 10 records)
+                    let current_avg = if records.len() > 10 {
+                        records.iter().take(10).map(|r| r.latency_ms).sum::<i64>() / 10
+                    } else {
+                        records.iter().map(|r| r.latency_ms).sum::<i64>() / records.len() as i64
+                    };
+
+                    // Calculate trend (compare with previous 10 records)
+                    let trend = if records.len() > 20 {
+                        let previous_avg = records.iter().skip(10).take(10).map(|r| r.latency_ms).sum::<i64>() / 10;
+                        if current_avg > previous_avg {
+                            "up"
+                        } else if current_avg < previous_avg {
+                            "down"
+                        } else {
+                            "neutral"
+                        }
+                    } else {
+                        "neutral"
+                    };
+
+                    let trend_value = if records.len() > 20 {
+                        let previous_avg = records.iter().skip(10).take(10).map(|r| r.latency_ms).sum::<i64>() / 10;
+                        current_avg - previous_avg
+                    } else {
+                        0
+                    };
+
+                    // Convert to history points for frontend (last 12 records with time formatting)
+                    let history: Vec<LatencyHistoryPoint> = records
+                        .iter().take(12)
+                        .rev() // Reverse to show oldest first
+                        .map(|r| LatencyHistoryPoint {
+                            time: r.recorded_at.format("%H:%M").to_string(),
+                            val: r.latency_ms,
+                        })
+                        .collect();
+
+                    println!("✅ Latency data: {}ms (trend: {}, records: {})", current_avg, trend, records.len());
+                    Ok(LatencyDataResponse {
+                        current: current_avg,
+                        trend: trend.to_string(),
+                        trend_value,
+                        history,
+                    })
+                }
+                Err(e) => {
+                    println!("❌ Failed to get latency data: {}", e);
+                    Err(format!("Failed to get latency data: {}", e))
+                }
+            }
+        }
+        None => Err("Database not initialized".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn get_usage_data(
+    db_state: State<'DatabaseState'>
+) -> Result<UsageDataResponse, String> {
+    let db = {
+        let guard = db_state.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    match db {
+        Some(database) => {
+            println!("🔍 Getting today's usage data");
+
+            match database.get_today_usage().await {
+                Some(usage) => {
+                    let success_rate = if usage.total_requests > 0 {
+                        (usage.successful_requests as f64 / usage.total_requests as f64) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    println!("✅ Usage data: {} mins, {:.1}% success rate", usage.total_minutes, success_rate);
+                    Ok(UsageDataResponse {
+                        today_minutes: usage.total_minutes,
+                        success_rate,
+                        total_requests: usage.total_requests,
+                        successful_requests: usage.successful_requests,
+                    })
+                }
+                None => {
+                    println!("⚠️ No usage data found for today");
+                    Ok(UsageDataResponse {
+                        today_minutes: 0,
+                        success_rate: 0.0,
+                        total_requests: 0,
+                        successful_requests: 0,
+                    })
+                }
+            }
+        }
+        None => Err("Database not initialized".to_string())
+    }
 }
