@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Mic, Settings, RefreshCw, Volume2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { ToggleInput } from '../ui/Input';
-import { HotkeyConfig } from '../../types';
+import { Input } from '../ui/Input';
+import { HotkeyConfig, TypingDelays } from '../../types';
 
 interface AudioDevice {
   id: string;
@@ -19,6 +20,16 @@ export const AdvancedSettings: React.FC = () => {
   // WAV Files Settings
   const [saveWavFiles, setSaveWavFiles] = useState(true);
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
+
+  // Typing Delays Settings
+  const [typingDelays, setTypingDelays] = useState<TypingDelays>({
+    clipboard_update_ms: 100,         // 剪贴板更新等待时间
+    keyboard_events_settle_ms: 300,   // 键盘事件处理等待时间
+    typing_complete_ms: 500,          // 打字完成后等待时间
+    character_interval_ms: 100,       // 字符间延迟时间
+    short_operation_ms: 100,          // 其他短操作延迟时间
+  });
 
   // Check if we're running in Tauri
   const checkTauriEnvironment = () => {
@@ -176,59 +187,152 @@ export const AdvancedSettings: React.FC = () => {
 
   // Load hotkey configuration from database on component mount
   useEffect(() => {
+    console.log('🔍 AdvancedSettings mount useEffect:');
+    console.log('  - isTauri:', isTauri);
+    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
+
     const loadHotkeyConfiguration = async () => {
       if (isTauri && hasLoadedFromDatabase === false) {
         try {
           console.log('📥 Loading hotkey config from database...');
           const config = await invoke<HotkeyConfig | null>('get_hotkey_config');
-          
+          console.log('📋 Raw config from database:', config);
+
           if (config) {
-            console.log('📥 Loaded hotkey config from database:', {
-              save_wav_files: config.save_wav_files
-            });
+            console.log('📥 Loaded hotkey config from database:');
+            console.log('  - save_wav_files:', config.save_wav_files);
+            console.log('  - clipboard_update_ms:', config.clipboard_update_ms);
+            console.log('  - keyboard_events_settle_ms:', config.keyboard_events_settle_ms);
+            console.log('  - typing_complete_ms:', config.typing_complete_ms);
+            console.log('  - character_interval_ms:', config.character_interval_ms);
+            console.log('  - short_operation_ms:', config.short_operation_ms);
+
+            console.log('🔄 Setting state with loaded values...');
             setSaveWavFiles(config.save_wav_files);
+
+            const newTypingDelays = {
+              clipboard_update_ms: config.clipboard_update_ms,
+              keyboard_events_settle_ms: config.keyboard_events_settle_ms,
+              typing_complete_ms: config.typing_complete_ms,
+              character_interval_ms: config.character_interval_ms,
+              short_operation_ms: config.short_operation_ms,
+            };
+            setTypingDelays(newTypingDelays);
+            console.log('✅ State updated with typing delays:', newTypingDelays);
           } else {
             console.log('📥 No hotkey config found, using defaults');
+            console.log('🔄 Setting state with default typing delays:', {
+              clipboard_update_ms: 100,
+              keyboard_events_settle_ms: 300,
+              typing_complete_ms: 500,
+              character_interval_ms: 100,
+              short_operation_ms: 100,
+            });
           }
         } catch (error) {
-          console.error('Failed to load hotkey configuration:', error);
+          console.error('❌ Failed to load hotkey configuration:', error);
+          console.error('❌ Error details:', JSON.stringify(error, null, 2));
         }
+        console.log('🔔 Setting hasLoadedFromDatabase to true');
         setHasLoadedFromDatabase(true);
+        // Mark initialization as complete after loading initial values
+        setTimeout(() => setIsInitializing(false), 0);
+      } else {
+        console.log('⏸️ Skipping config load - isTauri:', isTauri, ', hasLoadedFromDatabase:', hasLoadedFromDatabase);
+        if (!isTauri) {
+          // For non-Tauri environment, mark initialization as complete immediately
+          setTimeout(() => setIsInitializing(false), 0);
+        }
       }
     };
 
+    console.log('🚀 Calling loadHotkeyConfiguration...');
     loadHotkeyConfiguration();
   }, [isTauri, hasLoadedFromDatabase]);
 
   // Save hotkey configuration when saveWavFiles changes
   const saveHotkeyConfig = useCallback(async () => {
+    console.log('🎯 saveHotkeyConfig called:');
+    console.log('  - isTauri:', isTauri);
+    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
+    console.log('  - isInitializing:', isInitializing);
+
+    // Skip save during initialization to avoid unnecessary database writes
+    if (isInitializing) {
+      console.log('⏭️ Skipping save during component initialization');
+      return;
+    }
+
     if (isTauri && hasLoadedFromDatabase) {
       try {
+        console.log('📖 Reading existing configuration...');
+        // First, load existing configuration to preserve user settings
+        const existingConfig = await invoke<HotkeyConfig | null>('get_hotkey_config');
+        console.log('📋 Existing config loaded:', existingConfig);
+
+        // Check if values actually changed to avoid unnecessary database writes
+        const saveWavFilesChanged = !existingConfig || existingConfig.save_wav_files !== saveWavFiles;
+        const typingDelaysChanged = !existingConfig || 
+          existingConfig.clipboard_update_ms !== typingDelays.clipboard_update_ms ||
+          existingConfig.keyboard_events_settle_ms !== typingDelays.keyboard_events_settle_ms ||
+          existingConfig.typing_complete_ms !== typingDelays.typing_complete_ms ||
+          existingConfig.character_interval_ms !== typingDelays.character_interval_ms ||
+          existingConfig.short_operation_ms !== typingDelays.short_operation_ms;
+
+        if (!saveWavFilesChanged && !typingDelaysChanged) {
+          console.log('⏭️ No actual changes detected, skipping save to avoid unnecessary database write');
+          return;
+        }
+
         const config = {
-          transcribe_key: 'F4', // Default values - user can change these in Shortcuts tab
-          translate_key: 'Shift + F4',
-          trigger_delay_ms: 300,
-          anti_mistouch_enabled: true,
-          save_wav_files: saveWavFiles,
+          transcribe_key: existingConfig?.transcribe_key || 'F4', // Preserve existing values
+          translate_key: existingConfig?.translate_key || 'Shift + F4',
+          trigger_delay_ms: existingConfig?.trigger_delay_ms || 300,
+          anti_mistouch_enabled: existingConfig?.anti_mistouch_enabled ?? true,
+          save_wav_files: saveWavFiles, // Update only this setting
+          typing_delays: typingDelays, // Update only delays
         };
 
-        console.log('💾 Saving hotkey config (Audio Settings):');
+        console.log('💾 About to save hotkey config (Advanced Settings):');
+        console.log('  - save_wav_files changed:', saveWavFilesChanged);
+        console.log('  - typing_delays changed:', typingDelaysChanged);
         console.log('  - save_wav_files:', config.save_wav_files);
+        console.log('  - typing_delays:', config.typing_delays);
+        console.log('  - transcribe_key:', config.transcribe_key);
+        console.log('  - translate_key:', config.translate_key);
+        console.log('  - trigger_delay_ms:', config.trigger_delay_ms);
+        console.log('  - anti_mistouch_enabled:', config.anti_mistouch_enabled);
 
-        await invoke('save_hotkey_config', { request: config });
+        console.log('📡 Calling save_hotkey_config Tauri command...');
+        const result = await invoke('save_hotkey_config', { request: config });
+        console.log('✅ Tauri command result:', result);
         console.log('✅ Hotkey configuration saved successfully');
       } catch (error) {
-        console.error('Failed to save hotkey configuration:', error);
+        console.error('❌ Failed to save hotkey configuration:', error);
+        console.error('❌ Error details:', JSON.stringify(error, null, 2));
       }
+    } else {
+      console.log('❌ Cannot save - conditions not met:');
+      console.log('  - isTauri:', isTauri);
+      console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
     }
-  }, [saveWavFiles, isTauri, hasLoadedFromDatabase]);
+  }, [saveWavFiles, typingDelays, isTauri, hasLoadedFromDatabase]);
 
-  // Trigger save when saveWavFiles changes
+  // Trigger save when saveWavFiles or typingDelays changes
   useEffect(() => {
+    console.log('🔍 AdvancedSettings useEffect triggered:');
+    console.log('  - hasLoadedFromDatabase:', hasLoadedFromDatabase);
+    console.log('  - isTauri:', isTauri);
+    console.log('  - saveWavFiles changed to:', saveWavFiles);
+    console.log('  - typingDelays changed to:', typingDelays);
+
     if (hasLoadedFromDatabase) {
+      console.log('🚀 Calling saveHotkeyConfig...');
       saveHotkeyConfig();
+    } else {
+      console.log('⏳ Skipping save - database not loaded yet');
     }
-  }, [saveWavFiles, saveHotkeyConfig, hasLoadedFromDatabase]);
+  }, [saveWavFiles, typingDelays, saveHotkeyConfig, hasLoadedFromDatabase, isInitializing]);
 
   return (
     <div className="space-y-6">
@@ -367,13 +471,75 @@ export const AdvancedSettings: React.FC = () => {
         </div>
       </div>
 
-      {/* Additional Advanced Settings Placeholder */}
+      {/* Typing Delays Settings */}
       <div className="border-t border-gray-200 dark:border-dark-border pt-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-4">
-          System Configuration
+          <Settings className="w-5 h-5 inline mr-2" />
+          Typing Delays (milliseconds)
         </h3>
-        <div className="text-center py-8 text-gray-500 dark:text-dark-muted">
-          <p>Additional advanced settings coming soon...</p>
+        <div className="bg-white dark:bg-dark-secondary rounded-lg border border-gray-200 dark:border-dark-border p-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              label="Clipboard Update Wait"
+              type="number"
+              step={50}
+              value={typingDelays.clipboard_update_ms}
+              onChange={(value) => setTypingDelays(prev => ({...prev, clipboard_update_ms: value}))}
+              description="Wait for clipboard to update"
+              autoFocus={false}
+            />
+            <Input
+              label="Keyboard Events Settle"
+              type="number"
+              step={50}
+              value={typingDelays.keyboard_events_settle_ms}
+              onChange={(value) => {
+              console.log('⌨️ Keyboard Events Settle changed from', typingDelays.keyboard_events_settle_ms, 'to', value);
+              setTypingDelays(prev => {
+                const newDelays = {...prev, keyboard_events_settle_ms: value};
+                console.log('🔄 New typing delays after change:', newDelays);
+                return newDelays;
+              });
+            }}
+              description="Ensure keyboard events are fully processed"
+              autoFocus={false}
+            />
+            <Input
+              label="Typing Complete Wait"
+              type="number"
+              step={50}
+              value={typingDelays.typing_complete_ms}
+              onChange={(value) => setTypingDelays(prev => ({...prev, typing_complete_ms: value}))}
+              description="Ensure all character input completes"
+              autoFocus={false}
+            />
+            <Input
+              label="Character Interval"
+              type="number"
+              step={10}
+              value={typingDelays.character_interval_ms}
+              onChange={(value) => setTypingDelays(prev => ({...prev, character_interval_ms: value}))}
+              description="Delay between characters (important for Chinese)"
+              autoFocus={false}
+            />
+            <Input
+              label="Short Operation Delay"
+              type="number"
+              step={10}
+              value={typingDelays.short_operation_ms}
+              onChange={(value) => setTypingDelays(prev => ({...prev, short_operation_ms: value}))}
+              description="Other short operation delays"
+              autoFocus={false}
+            />
+          </div>
+
+          {isTauri && (
+            <div className="mt-4 p-3 bg-gray-50 dark:bg-dark-primary rounded-md">
+              <p className="text-sm text-gray-600 dark:text-dark-muted">
+                <strong>Note:</strong> These delays control typing behavior and are saved automatically. Adjust them if you experience timing issues with text input.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     </div>
