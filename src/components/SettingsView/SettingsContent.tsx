@@ -39,16 +39,46 @@ const ServiceOption: React.FC<ServiceOptionProps> = ({ id, title, description, i
 export const ASRSettings: React.FC = () => {
   // Track component mount/remount
   const mountId = useRef(`mount-${Date.now()}-${Math.random()}`);
+  
+  // Prevent multiple instances of ASRSettings from mounting simultaneously
+  if (typeof window !== 'undefined') {
+    const existingInstance = (window as any).__asrSettingsInstance;
+    if (existingInstance && existingInstance !== mountId.current) {
+      console.warn('⚠️ Multiple ASRSettings instances detected! Existing:', existingInstance, 'New:', mountId.current);
+    }
+    (window as any).__asrSettingsInstance = mountId.current;
+  }
+
+  // Debug state (moved to the top to avoid dependency issues)
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(true); // 默认显示调试面板
+
+  const addDebugLog = useCallback((message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message}`;
+    setDebugLogs(prev => [...prev.slice(-49), logEntry]); // 保留最近50条日志
+    console.log(message); // 同时输出到控制台（如果开启了的话）
+  }, []);
 
   useEffect(() => {
+    console.log('🏗️ ASRSettings component mounted - ID:', mountId.current);
+    console.log('🪟 Window.__TAURI__ available:', !!window.__TAURI__);
+    console.log('🪟 Window.__TAURI_INTERNALS__ available:', !!(window as any).__TAURI_INTERNALS__);
+    console.log('⚠️ CHECK: Multiple instances of ASRSettings might be mounting!');
+    addDebugLog('Component mounted. Environment: ' + (typeof window !== 'undefined' && window.__TAURI__ ? 'Tauri' : 'Browser') + ' - ID: ' + mountId.current);
     return () => {
-      console.log('🏗️ ASRSettings component unmounting');
+      console.log('🏗️ ASRSettings component unmounting - ID:', mountId.current);
+      // Clean up window reference
+      if (typeof window !== 'undefined' && (window as any).__asrSettingsInstance === mountId.current) {
+        delete (window as any).__asrSettingsInstance;
+      }
     };
-  }, []);
+  }, [addDebugLog]);
 
   // Initialize with undefined to avoid premature rendering and focus issues
   const [selectedService, setSelectedService] = useState<ServiceProvider | undefined>(undefined);
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
+  const [hasUserSelection, setHasUserSelection] = useState(false);
   const [apiKey, setApiKey] = useState('');
   const [localApiKey, setLocalApiKey] = useState('');
   const [localEndpoint, setLocalEndpoint] = useState('http://localhost:5001/inference');
@@ -70,23 +100,26 @@ export const ASRSettings: React.FC = () => {
   // File input state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
 
-  // Debug state
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-
-  const addDebugLog = useCallback((message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    setDebugLogs(prev => [...prev, `[${timestamp}] ${message}`]);
-    console.log(message);
-  }, []);
-
   // Check if running in Tauri environment
   const isTauriEnvironment = () => {
     return typeof window !== 'undefined' && window.__TAURI__;
   };
 
+  // Add a flag to prevent unnecessary health checks
+  const healthCheckRef = useRef(false);
+
   // Health check function (simplified version for auto-check)
   const checkHealthStatus = useCallback(async (serviceProvider: string, endpoint: string) => {
-    if (!endpoint) return;
+    if (!endpoint) {
+      addDebugLog('❌ No endpoint provided for health check');
+      return;
+    }
+
+    // Prevent multiple concurrent health checks
+    if (healthCheckRef.current) {
+      addDebugLog('⚠️ Health check already in progress, skipping...');
+      return;
+    }
 
     // Check if we're in Tauri environment
     if (!isTauriEnvironment()) {
@@ -97,9 +130,18 @@ export const ASRSettings: React.FC = () => {
     }
 
     setHealthStatus('checking');
+    healthCheckRef.current = true;
     addDebugLog('🏥 Auto health check started for: ' + serviceProvider);
+    addDebugLog('🔗 Endpoint: ' + endpoint);
+    addDebugLog('🌐 Window.__TAURI__ available: ' + !!window.__TAURI__);
 
+    // Test basic connection first
     try {
+      addDebugLog('📞 Testing basic backend connection...');
+      const testResponse = await invoke('test_frontend_backend_connection') as string;
+      addDebugLog('📨 Backend test response: ' + testResponse);
+
+      addDebugLog('📞 Invoking Rust command: test_connection_health');
       const response = await invoke('test_connection_health', {
         request: { endpoint }
       }) as {
@@ -107,6 +149,8 @@ export const ASRSettings: React.FC = () => {
         message: string;
         backend_count?: number;
       };
+
+      addDebugLog('📨 Received response from backend: ' + JSON.stringify(response));
 
       if (response.success) {
         setHealthStatus('healthy');
@@ -121,8 +165,12 @@ export const ASRSettings: React.FC = () => {
       setHealthStatus('unhealthy');
       setHealthMessage('Connection failed');
       addDebugLog('💥 Health check error: ' + String(error));
+      addDebugLog('🔍 Error type: ' + typeof error);
+      addDebugLog('🔍 Error details: ' + JSON.stringify(error, null, 2));
+    } finally {
+      healthCheckRef.current = false;
     }
-  }, [addDebugLog]);
+  }, []); // Remove addDebugLog dependency to prevent infinite loops
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -157,60 +205,135 @@ export const ASRSettings: React.FC = () => {
   // Load configuration from database on component mount - only run once
   useEffect(() => {
     let isMounted = true;
+    let hasStarted = false; // Prevent multiple concurrent loads
 
     const loadConfig = async () => {
+      // Prevent multiple concurrent loads
+      if (hasStarted) {
+        console.log('⚠️ Load config already in progress, skipping...');
+        return;
+      }
+      hasStarted = true;
+      console.log('🚀 ASRSettings loadConfig() starting - ID:', mountId.current);
+
       try {
+        console.log('🚀 SettingsContent: loadConfig() started');
         setIsLoading(true);
 
-        // Initialize database if needed
-        await DatabaseService.initDatabase();
+        // Initialize database if needed (with protection)
+        console.log('📊 SettingsContent: Initializing database...');
+        try {
+          await DatabaseService.initDatabase();
+          console.log('✅ SettingsContent: Database initialized');
+        } catch (dbError) {
+          if (dbError instanceof Error && dbError.message.includes('already initialized')) {
+            console.log('📦 Database already initialized, skipping');
+          } else {
+            throw dbError;
+          }
+        }
 
         // Try to migrate from localStorage (only if database is empty)
-        await StorageMigration.migrateFromLocalStorage();
+        console.log('📦 SettingsContent: Checking for localStorage migration...');
+        try {
+          await StorageMigration.migrateFromLocalStorage();
+          console.log('✅ SettingsContent: Migration check completed');
+        } catch (migrationError) {
+          if (migrationError instanceof Error && migrationError.message.includes('already checked')) {
+            console.log('📦 Migration already checked, skipping');
+          } else {
+            throw migrationError;
+          }
+        }
 
         // Load current configuration
+        console.log('📥 SettingsContent: Loading ASR configuration...');
         const config = await DatabaseService.getAsrConfig();
 
         if (isMounted) {
           if (config) {
             console.log('📥 Loaded config from database:', config.service_provider, 'updated_at:', config.updated_at);
-            setSelectedService(config.service_provider === 'local' ? ServiceProvider.Local : ServiceProvider.Cloud);
+            // Only apply database config if user hasn't made a selection
+            if (!hasUserSelection) {
+              setSelectedService(config.service_provider === 'local' ? ServiceProvider.Local : ServiceProvider.Cloud);
+            } else {
+              console.log('🔄 User has made selection, keeping user choice');
+            }
             setApiKey(config.cloud_api_key || '');
             setLocalApiKey(config.local_api_key || '');
             setLocalEndpoint(config.local_endpoint || 'http://localhost:5001/inference');
             setCloudEndpoint(config.cloud_endpoint || 'https://api.siliconflow.cn/v1/audio/transcriptions');
 
-            // Auto run health check after loading config
-            if (config.service_provider && (config.local_endpoint || config.cloud_endpoint)) {
-              setTimeout(() => {
-                checkHealthStatus(config.service_provider, config.local_endpoint || config.cloud_endpoint || '');
-              }, 1000); // Delay 1 second after config load
-            }
+            // Auto run health check after loading config - DISABLED to prevent infinite loops
+            // if (config.service_provider && (config.local_endpoint || config.cloud_endpoint)) {
+            //   setTimeout(() => {
+            //     if (isMounted) { // Check if still mounted before running health check
+            //       checkHealthStatus(config.service_provider, config.local_endpoint || config.cloud_endpoint || '');
+            //     }
+            //   }, 1000); // Delay 1 second after config load
+            // }
           } else {
-            // No config found, set default but don't cause focus
-            console.log('📥 No config found, setting default to Cloud');
-            setSelectedService(ServiceProvider.Cloud);
+            // No config found - only set default if user hasn't already made a selection
+            if (!hasUserSelection && selectedService === undefined) {
+              console.log('📥 No config found, setting default to Cloud');
+              setSelectedService(ServiceProvider.Cloud);
+            } else {
+              console.log('📥 No config found, keeping user selection:', selectedService);
+            }
           }
           setHasLoadedFromDatabase(true);
         }
       } catch (error) {
         console.error('Failed to load ASR configuration:', error);
         if (isMounted) {
-          setSelectedService(ServiceProvider.Cloud); // Fallback to Cloud
+          // Only set fallback if user hasn't made a selection yet
+          if (!hasUserSelection && selectedService === undefined) {
+            setSelectedService(ServiceProvider.Cloud); // Fallback to Cloud
+            console.log('⚠️ Error loading config, set fallback to Cloud');
+          }
         }
       } finally {
         if (isMounted) {
           setIsLoading(false);
         }
+        hasStarted = false; // Reset flag
       }
     };
 
-    loadConfig();
+    // Small delay to ensure component is fully mounted before loading
+    const timeoutId = setTimeout(loadConfig, 100);
 
     return () => {
       isMounted = false;
+      hasStarted = false;
+      clearTimeout(timeoutId);
     };
   }, []); // Empty dependency array - run only once
+
+  // Manual refresh function for debugging
+  const manualRefreshConfig = useCallback(async () => {
+    addDebugLog('🔄 Manual config refresh requested by user');
+    try {
+      setIsLoading(true);
+      await DatabaseService.initDatabase();
+      const config = await DatabaseService.getAsrConfig();
+      
+      if (config) {
+        addDebugLog(`✅ Manual refresh found config: ${config.service_provider}`);
+        setSelectedService(config.service_provider === 'local' ? ServiceProvider.Local : ServiceProvider.Cloud);
+        setApiKey(config.cloud_api_key || '');
+        setLocalApiKey(config.local_api_key || '');
+        setLocalEndpoint(config.local_endpoint || 'http://localhost:5001/inference');
+        setCloudEndpoint(config.cloud_endpoint || 'https://api.siliconflow.cn/v1/audio/transcriptions');
+      } else {
+        addDebugLog('📥 Manual refresh found no config');
+      }
+    } catch (error) {
+      addDebugLog(`❌ Manual refresh failed: ${error}`);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [addDebugLog]);
 
   // Save configuration to database - simple immediate save
   const saveConfiguration = useCallback(async () => {
@@ -242,16 +365,16 @@ export const ASRSettings: React.FC = () => {
       await DatabaseService.saveAsrConfig(config);
       console.log('✅ ASR configuration saved successfully');
 
-      // Trigger health check after saving
-      const endpoint = selectedService === ServiceProvider.Local ? localEndpoint : cloudEndpoint;
-      if (endpoint) {
-        setTimeout(() => {
-          checkHealthStatus(
-            selectedService === ServiceProvider.Local ? 'local' : 'cloud',
-            endpoint
-          );
-        }, 500);
-      }
+      // Trigger health check after saving - DISABLED to prevent infinite loops
+      // const endpoint = selectedService === ServiceProvider.Local ? localEndpoint : cloudEndpoint;
+      // if (endpoint) {
+      //   setTimeout(() => {
+      //     checkHealthStatus(
+      //       selectedService === ServiceProvider.Local ? 'local' : 'cloud',
+      //       endpoint
+      //     );
+      //   }, 500);
+      // }
     } catch (error) {
       console.error('Failed to save ASR configuration:', error);
     } finally {
@@ -262,6 +385,8 @@ export const ASRSettings: React.FC = () => {
   // Handle service selection change
   const handleServiceChange = useCallback((service: ServiceProvider) => {
     setSelectedService(service);
+    setHasUserSelection(true);
+    console.log('🎯 User selected service:', service);
     // Note: No automatic save - user must click Save button
   }, []);
 
@@ -414,6 +539,17 @@ export const ASRSettings: React.FC = () => {
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center space-x-3">
           <h2 className="text-2xl font-bold text-gray-900">ASR Service Settings</h2>
+          
+          {/* Debug refresh button */}
+          <Button
+            onClick={manualRefreshConfig}
+            loading={isLoading}
+            variant="secondary"
+            size="sm"
+            className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200"
+          >
+            🔄 Debug Refresh
+          </Button>
 
           {/* Health Status Indicator */}
           {hasLoadedFromDatabase && healthStatus !== 'idle' && (
@@ -629,26 +765,61 @@ export const ASRSettings: React.FC = () => {
         </div>
       </section>
 
+      {/* Debug Panel Toggle */}
+      <div className="mt-6 flex justify-center">
+        <Button
+          onClick={() => setShowDebugPanel(!showDebugPanel)}
+          variant="secondary"
+          size="sm"
+          className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300"
+        >
+          {showDebugPanel ? 'Hide' : 'Show'} Debug Panel ({debugLogs.length} logs)
+        </Button>
+      </div>
+
       {/* Debug Panel */}
-      {debugLogs.length > 0 && (
-        <section className="mt-6 bg-gray-900 text-green-400 rounded-xl border border-gray-700 p-4 shadow-sm font-mono text-xs">
+      {showDebugPanel && (
+        <section className="mt-4 bg-gray-900 text-green-400 rounded-xl border border-gray-700 p-4 shadow-sm font-mono text-xs">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-bold text-green-300">Debug Console</h3>
-            <Button
-              onClick={() => setDebugLogs([])}
-              variant="secondary"
-              size="sm"
-              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600"
-            >
-              Clear
-            </Button>
+            <h3 className="text-sm font-bold text-green-300">🔍 ASR Debug Console</h3>
+            <div className="flex space-x-2">
+              <Button
+                onClick={() => {
+                  // 复制所有日志到剪贴板
+                  navigator.clipboard.writeText(debugLogs.join('\n'));
+                }}
+                variant="secondary"
+                size="sm"
+                className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600"
+              >
+                Copy
+              </Button>
+              <Button
+                onClick={() => setDebugLogs([])}
+                variant="secondary"
+                size="sm"
+                className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600"
+              >
+                Clear
+              </Button>
+            </div>
           </div>
-          <div className="max-h-64 overflow-y-auto space-y-1">
-            {debugLogs.map((log, index) => (
-              <div key={index} className="border-b border-gray-800 pb-1 last:border-b-0">
-                {log}
-              </div>
-            ))}
+          <div className="max-h-80 overflow-y-auto space-y-1">
+            {debugLogs.length === 0 ? (
+              <div className="text-gray-500 text-center py-4">No debug logs yet. Try performing an action...</div>
+            ) : (
+              debugLogs.map((log, index) => (
+                <div key={index} className="border-b border-gray-800 pb-1 last:border-b-0">
+                  {log}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="mt-3 pt-3 border-t border-gray-700">
+            <div className="flex justify-between items-center text-xs text-gray-400">
+              <span>Environment: {typeof window !== 'undefined' && window.__TAURI__ ? 'Tauri Desktop' : 'Browser'}</span>
+              <span>Logs: {debugLogs.length}/50</span>
+            </div>
           </div>
         </section>
       )}
@@ -672,8 +843,8 @@ export const ShortcutSettings: React.FC = () => {
 
         const loadHotkeyConfiguration = async () => {
             try {
-                // Initialize database if not already done
-                await invoke('init_database');
+                // Initialize database using DatabaseService (with built-in protection)
+                await DatabaseService.initDatabase();
 
                 if (typeof window !== 'undefined' && window.__TAURI__) {
                     // In Tauri environment, load from SQLite database
