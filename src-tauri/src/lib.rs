@@ -33,7 +33,9 @@ use commands::{
     add_history_record, get_history_records, get_history_stats, cleanup_old_records,
     get_hotkey_config, save_hotkey_config,
     start_test_recording, get_audio_devices, test_microphone,
-    test_asr_transcription
+    test_asr_transcription,
+    get_service_status, get_latency_data, get_usage_data,
+    handle_asr_result
 };
 
 use std::sync::{Arc, Mutex};
@@ -44,6 +46,19 @@ use commands::DatabaseState;
 pub fn run() {
     // Initialize database state
     let db_state: DatabaseState = Arc::new(Mutex::new(None));
+
+    // Initialize database immediately before creating the app
+    println!("🚀 Initializing database on app startup...");
+    let db_for_init = db_state.clone();
+    tauri::async_runtime::block_on(async move {
+        match commands::init_database_direct().await {
+            Ok(db) => {
+                println!("✅ Database initialization successful");
+                *db_for_init.lock().unwrap() = Some(db);
+            }
+            Err(e) => eprintln!("❌ Failed to initialize database on startup: {}", e),
+        }
+    });
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -80,7 +95,8 @@ pub fn run() {
             // Live data commands
             get_service_status,
             get_latency_data,
-            get_usage_data
+            get_usage_data,
+            handle_asr_result
         ])
         .setup(|app| {
             // Setup application if needed

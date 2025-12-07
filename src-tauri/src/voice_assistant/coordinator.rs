@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::sync::OnceLock;
+use tauri::{AppHandle, Emitter};
 use crate::voice_assistant::{
     AsrProcessor, TranslateProcessor, 
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
@@ -11,6 +12,157 @@ use tracing::{info, error};
 
 // Global VoiceAssistant instance
 static VOICE_ASSISTANT: OnceLock<Arc<Mutex<Option<VoiceAssistant>>>> = OnceLock::new();
+// Global App handle for emitting events
+static APP_HANDLE: OnceLock<Arc<Mutex<Option<AppHandle>>>> = OnceLock::new();
+
+// Helper function to set the global app handle
+pub fn set_app_handle(handle: AppHandle) {
+    APP_HANDLE.set(Arc::new(Mutex::new(Some(handle)))).ok();
+}
+
+// Helper function to emit voice assistant state change events
+fn emit_voice_assistant_state_change(state: &InputState) {
+    if let Some(handle_guard) = APP_HANDLE.get() {
+        if let Ok(app_handle) = handle_guard.lock() {
+            if let Some(ref handle) = *app_handle {
+                let state_str = match state {
+                    InputState::Idle => "Idle".to_string(),
+                    InputState::Recording => "Recording".to_string(),
+                    InputState::RecordingTranslate => "RecordingTranslate".to_string(),
+                    InputState::Processing => "Processing".to_string(),
+                    InputState::Translating => "Translating".to_string(),
+                    InputState::Error => "Error".to_string(),
+                    InputState::Warning => "Warning".to_string(),
+                };
+                
+                if let Err(e) = handle.emit("voice-assistant-state-changed", &state_str) {
+                    error!("Failed to emit voice assistant state change event: {}", e);
+                } else {
+                    info!("✅ Emitted voice assistant state change: {}", state_str);
+                }
+            }
+        }
+    }
+}
+
+// Public function that can be called from keyboard manager
+pub fn emit_voice_assistant_state_from_keyboard(state: &InputState) {
+    emit_voice_assistant_state_change(state);
+}
+
+// Helper function to emit new history record events
+pub fn emit_new_history_record_event() {
+    if let Some(handle_guard) = APP_HANDLE.get() {
+        if let Ok(app_handle) = handle_guard.lock() {
+            if let Some(ref handle) = *app_handle {
+                if let Err(e) = handle.emit("new-history-record", "record_added") {
+                    error!("Failed to emit new history record event: {}", e);
+                } else {
+                    info!("✅ Emitted new history record event");
+                }
+            }
+        }
+    }
+}
+
+// Helper function to emit service status update events
+pub fn emit_service_status_updated_event() {
+    if let Some(handle_guard) = APP_HANDLE.get() {
+        if let Ok(app_handle) = handle_guard.lock() {
+            if let Some(ref handle) = *app_handle {
+                if let Err(e) = handle.emit("service-status-updated", "status_updated") {
+                    error!("Failed to emit service status update event: {}", e);
+                } else {
+                    info!("✅ Emitted service status update event");
+                }
+            }
+        }
+    }
+}
+
+// Directly save ASR result to database and emit update events
+pub async fn save_asr_result_directly(
+    output_text: String,
+    processor_type: &str,
+    processing_time_ms: Option<i64>,
+    success: bool,
+    error_message: Option<String>,
+) {
+    println!("📊 [Coordinator] Directly saving ASR result to database...");
+    
+    // Create history record
+    let record = crate::database::NewHistoryRecord {
+        record_type: "asr".to_string(),
+        input_text: None,
+        output_text: Some(output_text),
+        audio_file_path: None,
+        processor_type: Some(processor_type.to_string()),
+        processing_time_ms,
+        success,
+        error_message,
+    };
+
+    // Use global database pool
+    match crate::database::Database::from_global_pool().await {
+        Ok(database) => {
+            match database.add_history_record(record).await {
+                Ok(_) => {
+                    println!("✅ [Coordinator] ASR result saved to database successfully");
+                    // Emit update events for frontend refresh
+                    emit_new_history_record_event();
+                    emit_service_status_updated_event();
+                }
+                Err(e) => {
+                    println!("❌ [Coordinator] Failed to save ASR result to database: {}", e);
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ [Coordinator] Failed to get database instance: {}", e);
+        }
+    }
+}
+
+// Helper function to emit ASR result events
+pub fn emit_asr_result_event(result: &AsrResult) {
+    println!("🚀 [Backend] Attempting to emit ASR result event...");
+    if let Some(handle_guard) = APP_HANDLE.get() {
+        println!("🔍 [Backend] Got app handle guard");
+        if let Ok(app_handle) = handle_guard.lock() {
+            println!("🔍 [Backend] Got app handle lock");
+            if let Some(ref handle) = *app_handle {
+                println!("🔍 [Backend] Got app handle reference");
+                match handle.emit("asr-result-complete", result) {
+                    Ok(_) => {
+                        info!("✅ Emitted ASR result event: {} chars", result.output_text.chars().count());
+                        println!("✅ [Backend] ASR result event emitted successfully");
+                    }
+                    Err(e) => {
+                        error!("Failed to emit ASR result event: {}", e);
+                        println!("❌ [Backend] Failed to emit ASR result event: {}", e);
+                    }
+                }
+            } else {
+                println!("❌ [Backend] No app handle reference");
+            }
+        } else {
+            println!("❌ [Backend] Failed to get app handle lock");
+        }
+    } else {
+        println!("❌ [Backend] No app handle guard available");
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AsrResult {
+    pub success: bool,
+    pub input_text: Option<String>,
+    pub output_text: String,
+    pub processor_type: String,
+    pub processing_time_ms: Option<i64>,
+    pub audio_file_path: Option<String>,
+    pub error_message: Option<String>,
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -577,6 +729,8 @@ pub async fn start_voice_assistant() -> Result<String, String> {
                         *va = Some(assistant);
                     }
                     info!("✅ VoiceAssistant started successfully");
+                    // Emit initial state
+                    emit_voice_assistant_state_change(&InputState::Idle);
                     Ok("VoiceAssistant started successfully".to_string())
                 }
                 Err(e) => {
@@ -611,6 +765,8 @@ pub async fn stop_voice_assistant() -> Result<String, String> {
             match assistant.stop() {
                 Ok(()) => {
                     info!("✅ VoiceAssistant stopped successfully");
+                    // Emit stopped state
+                    emit_voice_assistant_state_change(&InputState::Idle);
                     Ok("VoiceAssistant stopped successfully".to_string())
                 }
                 Err(e) => {

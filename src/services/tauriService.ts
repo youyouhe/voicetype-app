@@ -90,6 +90,8 @@ export class TauriService {
     return await invoke<UsageData>('get_usage_data');
   }
 
+  
+
   // Legacy functions (keep for compatibility)
   static async greet(name: string): Promise<string> {
     return await invoke<string>('greet', { name });
