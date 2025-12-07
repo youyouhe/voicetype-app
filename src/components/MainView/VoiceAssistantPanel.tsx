@@ -32,58 +32,98 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
 
   const startVoiceAssistant = async () => {
     try {
+      console.log('🎤 VoiceAssistantPanel starting Voice Assistant...');
       const result = await TauriService.startVoiceAssistant();
       console.log('Voice Assistant started:', result);
-      // Optimistically set to true, but let events handle the real state
-      if (onStatusChange) {
-        onStatusChange(true);
-      }
+
+      // Wait a bit for backend to initialize, then check actual state
+      setTimeout(async () => {
+        try {
+          const actualState = await TauriService.getVoiceAssistantState();
+          console.log('🔍 VoiceAssistantPanel - Actual state after start:', actualState);
+          const cleanState = actualState.replace(/"/g, '').trim();
+          const isActuallyRunning = cleanState === 'Running' ||
+                                  cleanState === 'Recording' ||
+                                  cleanState === 'RecordingTranslate' ||
+                                  cleanState === 'Processing' ||
+                                  cleanState === 'Translating';
+
+          console.log('🟢 VoiceAssistantPanel - Actually running after start:', isActuallyRunning);
+          if (onStatusChange) {
+            onStatusChange(isActuallyRunning);
+          }
+        } catch (error) {
+          console.error('VoiceAssistantPanel - Failed to verify Voice Assistant state:', error);
+          if (onStatusChange) {
+            onStatusChange(false);
+          }
+        }
+      }, 500); // Wait 500ms for backend to initialize
+
     } catch (error) {
-      console.error('Failed to start Voice Assistant:', error);
-      setIsRunning(false);
+      console.error('VoiceAssistantPanel - Failed to start Voice Assistant:', error);
+      if (onStatusChange) {
+        onStatusChange(false);
+      }
     }
   };
 
   const stopVoiceAssistant = async () => {
     try {
+      console.log('🎤 VoiceAssistantPanel stopping Voice Assistant...');
       const result = await TauriService.stopVoiceAssistant();
       console.log('Voice Assistant stopped:', result);
-      // Optimistically set to false, but let events handle the real state
+
+      // Wait a bit for backend to stop, then verify actual state
+      setTimeout(async () => {
+        try {
+          const actualState = await TauriService.getVoiceAssistantState();
+          console.log('🔍 VoiceAssistantPanel - Actual state after stop:', actualState);
+          const cleanState = actualState.replace(/"/g, '').trim();
+          const isActuallyRunning = cleanState === 'Running' ||
+                                  cleanState === 'Recording' ||
+                                  cleanState === 'RecordingTranslate' ||
+                                  cleanState === 'Processing' ||
+                                  cleanState === 'Translating';
+
+          console.log('🟢 VoiceAssistantPanel - Actually running after stop:', isActuallyRunning);
+          if (onStatusChange) {
+            onStatusChange(isActuallyRunning);
+          }
+        } catch (error) {
+          console.error('VoiceAssistantPanel - Failed to verify stop state:', error);
+          if (onStatusChange) {
+            onStatusChange(false);
+          }
+        }
+      }, 300); // Wait 300ms for backend to stop
+
+    } catch (error) {
+      console.error('VoiceAssistantPanel - Failed to stop Voice Assistant:', error);
       if (onStatusChange) {
         onStatusChange(false);
       }
-    } catch (error) {
-      console.error('Failed to stop Voice Assistant:', error);
     }
   };
 
   return (
     <div className="bg-white rounded-2xl shadow-lg shadow-gray-200/50 p-6 mb-8 border border-white">
-      <h3 className="text-lg font-bold text-gray-900 mb-4">🎤 Voice Assistant Control</h3>
+      <h3 className="text-lg font-bold text-gray-900 mb-4">🎤 Voice Assistant Status</h3>
 
-      {/* Control Buttons */}
-      <div className="flex flex-col sm:flex-row space-y-3 sm:space-y-0 sm:space-x-4 mb-6">
-        <Button
-          variant={isRunning ? "secondary" : "primary"}
-          size="lg"
-          onClick={isRunning ? stopVoiceAssistant : startVoiceAssistant}
-          className="flex-1"
-        >
-          {isRunning ? '⏹️ Stop Voice Assistant' : '▶️ Start Voice Assistant'}
-        </Button>
-      </div>
-
-      {/* Status */}
-      <div className="mb-6 p-4 bg-gray-50 rounded-lg">
+      {/* Status Display */}
+      <div className="p-4 bg-gray-50 rounded-lg">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Status:</span>
+          <span className="text-sm font-medium">Service Status:</span>
           <span className={`text-sm font-bold ${isRunning ? 'text-green-600' : 'text-gray-600'}`}>
-            {isRunning ? '🟢 Running' : '⚪ Stopped'}
+            {isRunning ? '🟢 Active' : '⚪ Inactive'}
           </span>
         </div>
+        <div className="mt-2 text-xs text-gray-500">
+          {isRunning
+            ? 'Voice Assistant is running and listening for hotkeys (F4, Shift+F4)'
+            : 'Use the Start button in the top bar to activate Voice Assistant'}
+        </div>
       </div>
-
-  
     </div>
   );
 };
