@@ -10,6 +10,7 @@ import { VoiceAssistantPanel } from './components/MainView/VoiceAssistantPanel';
 import { Button } from './components/ui/Button';
 import { SettingsView } from './components/SettingsView';
 import { TauriService } from './services/tauriService';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 // --- Constants ---
 const STORAGE_KEY = 'whisper_input_history';
@@ -382,19 +383,21 @@ const App: React.FC = () => {
   
 
   return (
-    <div className="min-h-screen bg-[#F3F4F6] text-gray-900 font-sans selection:bg-primary-100 selection:text-primary-900">
-      <TopBar />
-      {currentView === 'dashboard' ? <DashboardView /> : <SettingsView activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} />}
-      
-      {/* Mobile Status Bar (Visible only on small screens) */}
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-between items-center z-40">
-         <div className="flex items-center space-x-2">
-            <div className={`w-2 h-2 rounded-full ${appStatus === AppStatus.Recording ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`} />
-            <span className="text-sm font-medium">{appStatus === AppStatus.Idle ? 'Idle' : 'Active'}</span>
-         </div>
-         <span className="text-xs text-gray-400">Cloud ASR</span>
+    <ThemeProvider>
+      <div className="min-h-screen bg-[#F3F4F6] text-gray-900 font-sans selection:bg-primary-100 selection:text-primary-900">
+        <TopBar />
+        {currentView === 'dashboard' ? <DashboardView /> : <SettingsView activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} />}
+        
+        {/* Mobile Status Bar (Visible only on small screens) */}
+        <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-between items-center z-40">
+           <div className="flex items-center space-x-2">
+              <div className={`w-2 h-2 rounded-full ${appStatus === AppStatus.Recording ? 'bg-red-500 animate-pulse' : 'bg-gray-400'}`} />
+              <span className="text-sm font-medium">{appStatus === AppStatus.Idle ? 'Idle' : 'Active'}</span>
+           </div>
+           <span className="text-xs text-gray-400">Cloud ASR</span>
+        </div>
       </div>
-    </div>
+    </ThemeProvider>
   );
 };
 
