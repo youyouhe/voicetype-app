@@ -14,6 +14,26 @@ export interface SystemInfo {
   [key: string]: string;
 }
 
+export interface ServiceStatus {
+  active_service: string;
+  status: 'online' | 'offline' | 'error';
+  endpoint?: string;
+}
+
+export interface LatencyData {
+  current: number;
+  trend: 'up' | 'down' | 'neutral';
+  trend_value: number;
+  history: { time: string; val: number }[];
+}
+
+export interface UsageData {
+  today_minutes: number;
+  success_rate: number;
+  total_requests: number;
+  successful_requests: number;
+}
+
 export interface ProcessorType {
   Whisper: 'whisper';
   SenseVoice: 'sensevoice';
@@ -55,6 +75,19 @@ export class TauriService {
 
   static async getSystemInfo(): Promise<SystemInfo> {
     return await invoke<SystemInfo>('get_system_info');
+  }
+
+  // Live Data Methods
+  static async getServiceStatus(): Promise<ServiceStatus> {
+    return await invoke<ServiceStatus>('get_service_status');
+  }
+
+  static async getLatencyData(): Promise<LatencyData> {
+    return await invoke<LatencyData>('get_latency_data');
+  }
+
+  static async getUsageData(): Promise<UsageData> {
+    return await invoke<UsageData>('get_usage_data');
   }
 
   // Legacy functions (keep for compatibility)
