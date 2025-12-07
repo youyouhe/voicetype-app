@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use tracing::info;
 use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 // Database models
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -66,6 +67,70 @@ pub struct NewHistoryRecord {
     pub error_message: Option<String>,
 }
 
+// Statistics models
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct ServiceStats {
+    pub id: String,
+    pub service_name: String,
+    pub status: String, // "online", "offline", "error"
+    pub endpoint: Option<String>,
+    pub last_check: DateTime<Utc>,
+    pub uptime_seconds: i64,
+    pub total_requests: i64,
+    pub successful_requests: i64,
+    pub failed_requests: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct LatencyRecord {
+    pub id: String,
+    pub service_name: String,
+    pub latency_ms: i64,
+    pub request_type: String, // "transcribe", "translate"
+    pub recorded_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct UsageLog {
+    pub id: String,
+    pub date: String, // YYYY-MM-DD format
+    pub total_minutes: i64,
+    pub total_requests: i64,
+    pub successful_requests: i64,
+    pub failed_requests: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewServiceStats {
+    pub service_name: String,
+    pub status: String,
+    pub endpoint: Option<String>,
+    pub uptime_seconds: i64,
+    pub total_requests: i64,
+    pub successful_requests: i64,
+    pub failed_requests: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewLatencyRecord {
+    pub service_name: String,
+    pub latency_ms: i64,
+    pub request_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewUsageLog {
+    pub date: String,
+    pub total_minutes: i64,
+    pub total_requests: i64,
+    pub successful_requests: i64,
+    pub failed_requests: i64,
+}
+
 #[derive(Clone)]
 pub struct Database {
     pool: SqlitePool,
@@ -73,26 +138,37 @@ pub struct Database {
 
 impl Database {
     pub async fn new() -> Result<Self, sqlx::Error> {
+        println!("🗄️ Database: Database::new() called");
+        
         // Use a hidden directory to avoid triggering file watches
         let app_dir = std::env::current_dir().unwrap().join(".tauri-data");
+        println!("📁 Database: App dir: {:?}", app_dir);
         std::fs::create_dir_all(&app_dir).ok();
 
         let db_dir = app_dir.join("databases");
+        println!("📁 Database: DB dir: {:?}", db_dir);
         std::fs::create_dir_all(&db_dir).ok();
 
         let db_path = db_dir.join("voice_assistant.db");
+        println!("📁 Database: DB path: {:?}", db_path);
         let connection_string = format!("sqlite:{}", db_path.display());
+        println!("🔗 Database: Connection string: {}", connection_string);
 
         info!("Initializing database at: {}", connection_string);
 
+        println!("🔌 Database: Creating SQLite connection...");
         let connect_options = SqliteConnectOptions::from_str(&connection_string)?
             .create_if_missing(true);
 
+        println!("🏊 Database: Connecting to database pool...");
         let pool = SqlitePool::connect_with(connect_options).await?;
+        println!("✅ Database: Database pool connected successfully");
 
         // Run migrations
+        println!("🔄 Database: Creating database instance and running migrations...");
         let db = Self { pool };
         db.migrate().await?;
+        println!("✅ Database: Migrations completed successfully");
 
         Ok(db)
     }
@@ -191,6 +267,73 @@ impl Database {
         .await
         .ok(); // Ignore error if column already exists
 
+        // Create service stats table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS service_stats (
+                id TEXT PRIMARY KEY,
+                service_name TEXT NOT NULL UNIQUE,
+                status TEXT NOT NULL DEFAULT 'offline',
+                endpoint TEXT,
+                last_check DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                uptime_seconds INTEGER NOT NULL DEFAULT 0,
+                total_requests INTEGER NOT NULL DEFAULT 0,
+                successful_requests INTEGER NOT NULL DEFAULT 0,
+                failed_requests INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create latency records table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS latency_records (
+                id TEXT PRIMARY KEY,
+                service_name TEXT NOT NULL,
+                latency_ms INTEGER NOT NULL,
+                request_type TEXT NOT NULL,
+                recorded_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create usage logs table
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS usage_logs (
+                id TEXT PRIMARY KEY,
+                date TEXT NOT NULL UNIQUE,
+                total_minutes INTEGER NOT NULL DEFAULT 0,
+                total_requests INTEGER NOT NULL DEFAULT 0,
+                successful_requests INTEGER NOT NULL DEFAULT 0,
+                failed_requests INTEGER NOT NULL DEFAULT 0,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Create indexes for statistics tables
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_latency_service ON latency_records(service_name)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_latency_recorded ON latency_records(recorded_at)")
+            .execute(&self.pool)
+            .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_logs(date)")
+            .execute(&self.pool)
+            .await?;
+
         info!("Database migrations completed successfully");
         Ok(())
     }
@@ -276,11 +419,28 @@ impl Database {
 
     // ASR Configuration methods
     pub async fn get_asr_config(&self) -> Result<Option<AsrConfig>, sqlx::Error> {
+        println!("🗄️ Database: get_asr_config() called");
+        println!("🔍 Database: Querying asr_configs table...");
+        
         let config = sqlx::query_as::<_, AsrConfig>(
             "SELECT * FROM asr_configs ORDER BY updated_at DESC LIMIT 1"
         )
         .fetch_optional(&self.pool)
         .await?;
+
+        if let Some(ref cfg) = config {
+            println!("✅ Database: Query successful, found ASR config:");
+            println!("  - ID: {}", cfg.id);
+            println!("  - Service Provider: {}", cfg.service_provider);
+            println!("  - Local Endpoint: {:?}", cfg.local_endpoint);
+            println!("  - Local API Key: {}", cfg.local_api_key.is_some());
+            println!("  - Cloud Endpoint: {:?}", cfg.cloud_endpoint);
+            println!("  - Cloud API Key: {}", cfg.cloud_api_key.is_some());
+            println!("  - Created At: {}", cfg.created_at);
+            println!("  - Updated At: {}", cfg.updated_at);
+        } else {
+            println!("📥 Database: Query successful, but no ASR config found");
+        }
 
         Ok(config)
     }
@@ -482,6 +642,156 @@ impl Database {
         info!("Cleaned up {} old records older than {} days", deleted_count, days);
 
         Ok(deleted_count)
+    }
+
+    /// Create or get a global database pool instance
+    pub async fn from_global_pool() -> Result<Self, sqlx::Error> {
+        static GLOBAL_POOL: std::sync::LazyLock<Arc<Mutex<Option<SqlitePool>>>> =
+            std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+        // Try to get existing pool
+        {
+            let pool_guard = GLOBAL_POOL.lock().unwrap();
+            if let Some(ref pool) = *pool_guard {
+                let db = Self { pool: pool.clone() };
+                return Ok(db);
+            }
+        }
+
+        // Create new pool if none exists
+        let app_dir = std::env::current_dir().unwrap().join(".tauri-data");
+        std::fs::create_dir_all(&app_dir).ok();
+
+        let db_dir = app_dir.join("databases");
+        std::fs::create_dir_all(&db_dir).ok();
+
+        let db_path = db_dir.join("voice_assistant.db");
+        let connection_string = format!("sqlite:{}", db_path.display());
+
+        info!("Initializing global database pool at: {}", connection_string);
+
+        let connect_options = SqliteConnectOptions::from_str(&connection_string)
+            .unwrap_or_else(|_| SqliteConnectOptions::new().filename(&db_path))
+            .create_if_missing(true);
+
+        let pool = SqlitePool::connect_with(connect_options).await?;
+
+        // Store the pool globally
+        {
+            let mut pool_guard = GLOBAL_POOL.lock().unwrap();
+            *pool_guard = Some(pool.clone());
+        }
+
+        let db = Self { pool };
+        // Run migrations
+        db.migrate().await?;
+        Ok(db)
+    }
+
+    // Statistics methods for frontend
+    pub async fn get_service_status(&self, service_name: &str) -> Result<Option<ServiceStats>, sqlx::Error> {
+        let stats = sqlx::query_as::<_, ServiceStats>(
+            "SELECT * FROM service_stats WHERE service_name = ?"
+        )
+        .bind(service_name)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(stats)
+    }
+
+    pub async fn get_all_service_stats(&self) -> Result<Vec<ServiceStats>, sqlx::Error> {
+        let stats = sqlx::query_as::<_, ServiceStats>(
+            "SELECT * FROM service_stats ORDER BY updated_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(stats)
+    }
+
+    pub async fn update_service_status(&self, service_name: &str, status: &str, endpoint: Option<String>) -> Result<(), sqlx::Error> {
+        let now = Utc::now();
+
+        let result = sqlx::query(
+            r#"
+            UPDATE service_stats SET
+                status = ?1,
+                endpoint = ?2,
+                last_check = ?3,
+                updated_at = ?3
+            WHERE service_name = ?4
+            "#
+        )
+        .bind(status)
+        .bind(&endpoint)
+        .bind(now)
+        .bind(service_name)
+        .execute(&self.pool)
+        .await?;
+
+        // If no rows were affected, create a new service stats record
+        if result.rows_affected() == 0 {
+            let id = Uuid::new_v4().to_string();
+            sqlx::query(
+                r#"
+                INSERT INTO service_stats (
+                    id, service_name, status, endpoint, last_check, uptime_seconds,
+                    total_requests, successful_requests, failed_requests, created_at, updated_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+                "#
+            )
+            .bind(&id)
+            .bind(service_name)
+            .bind(status)
+            .bind(&endpoint)
+            .bind(now)
+            .bind(0i64)
+            .bind(0i64)
+            .bind(0i64)
+            .bind(0i64)
+            .bind(now)
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_latency_data(&self, service_name: &str, hours_back: i64) -> Result<Vec<LatencyRecord>, sqlx::Error> {
+        let cutoff = Utc::now() - chrono::Duration::hours(hours_back);
+
+        let records = sqlx::query_as::<_, LatencyRecord>(
+            r#"
+            SELECT * FROM latency_records
+            WHERE service_name = ? AND recorded_at >= ?
+            ORDER BY recorded_at DESC
+            "#
+        )
+        .bind(service_name)
+        .bind(cutoff)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(records)
+    }
+
+    pub async fn get_usage_data(&self, date: &str) -> Result<Option<UsageLog>, sqlx::Error> {
+        let usage = sqlx::query_as::<_, UsageLog>(
+            "SELECT * FROM usage_logs WHERE date = ?"
+        )
+        .bind(date)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(usage)
+    }
+
+    pub async fn get_today_usage(&self) -> Result<Option<UsageLog>, sqlx::Error> {
+        let today = Utc::now().format("%Y-%m-%d").to_string();
+        self.get_usage_data(&today).await
     }
 }
 
