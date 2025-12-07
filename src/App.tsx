@@ -23,10 +23,28 @@ const App: React.FC = () => {
   const [appStatus, setAppStatus] = useState<AppStatus>(AppStatus.Idle);
   const [activeSettingsTab, setActiveSettingsTab] = useState('asr');
   const [isVoiceAssistantRunning, setIsVoiceAssistantRunning] = useState(false);
+  const [voiceAssistantState, setVoiceAssistantState] = useState<string>('Idle');
 
   // History State
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Map Voice Assistant state to AppStatus
+  const mapVoiceAssistantStateToAppStatus = (state: string): AppStatus => {
+    switch (state) {
+      case 'Recording':
+      case 'RecordingTranslate':
+        return AppStatus.Recording;
+      case 'Processing':
+      case 'Translating':
+        return AppStatus.Processing;
+      case 'Running':
+        return AppStatus.Idle; // Running but not actively recording
+      case 'Idle':
+      default:
+        return AppStatus.Idle;
+    }
+  };
   
   
 
@@ -75,21 +93,27 @@ const App: React.FC = () => {
         
         console.log('🟢 Initially running:', isInitiallyRunning);
         setIsVoiceAssistantRunning(isInitiallyRunning);
+        setVoiceAssistantState(cleanInitialState);
+        setAppStatus(mapVoiceAssistantStateToAppStatus(cleanInitialState));
 
         // Set up event listener for state changes
         console.log('👂 Setting up event listener for voice-assistant-state-changed...');
         const unlisten = await listen<string>('voice-assistant-state-changed', (event) => {
           console.log('📡 Received voice assistant state change event:', event.payload);
-          
+
           const newState = event.payload;
           const isRunning = newState === 'Running' ||
                            newState === 'Recording' ||
                            newState === 'RecordingTranslate' ||
                            newState === 'Processing' ||
                            newState === 'Translating';
-          
+
           console.log('🟢 Updated is running:', isRunning);
+          console.log('🟢 Updated state:', newState);
+
           setIsVoiceAssistantRunning(isRunning);
+          setVoiceAssistantState(newState);
+          setAppStatus(mapVoiceAssistantStateToAppStatus(newState));
         });
 
         console.log('✅ Voice Assistant state event listener set up successfully');
@@ -245,15 +269,15 @@ const App: React.FC = () => {
 
         <div className="flex items-center space-x-2">
           <Button
-            variant="ghost"
+            variant={isVoiceAssistantRunning ? "secondary" : "ghost"}
             size="sm"
             icon={<Mic className="w-4 h-4"/>}
-            onClick={startVoiceAssistant}
-            disabled={appStatus !== AppStatus.Idle}
+            onClick={isVoiceAssistantRunning ? stopVoiceAssistant : startVoiceAssistant}
+            disabled={appStatus === AppStatus.Recording || appStatus === AppStatus.Processing}
             className="hidden md:flex"
-            title="Start Voice Assistant"
+            title={isVoiceAssistantRunning ? "Stop Voice Assistant" : "Start Voice Assistant"}
           >
-            Start
+            {isVoiceAssistantRunning ? 'Stop' : 'Start'}
           </Button>
           <Button
             variant="ghost"
