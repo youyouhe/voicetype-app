@@ -631,7 +631,11 @@ pub async fn get_voice_assistant_state() -> Result<String, String> {
     let va = instance.lock().unwrap();
     if let Some(assistant) = va.as_ref() {
         let state = assistant.get_state();
-        Ok(format!("{:?}", state))
+        // If VoiceAssistant instance exists, it's running even if internal state is Idle
+        match state {
+            InputState::Idle => Ok("Running".to_string()),
+            _ => Ok(format!("{:?}", state))
+        }
     } else {
         Ok("Idle".to_string())
     }

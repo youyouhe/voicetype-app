@@ -2,8 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { TauriService } from '../../services/tauriService';
 
-export const VoiceAssistantPanel = () => {
-  const [isRunning, setIsRunning] = useState(false);
+interface VoiceAssistantPanelProps {
+  isRunning?: boolean;
+  onStatusChange?: (running: boolean) => void;
+}
+
+export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
+  isRunning: externalIsRunning,
+  onStatusChange
+}) => {
+  const [internalIsRunning, setInternalIsRunning] = useState(false);
+
+  // Use external state if provided, otherwise use internal state
+  const isRunning = externalIsRunning !== undefined ? externalIsRunning : internalIsRunning;
+
+  // Update internal state only if we don't have external control
+  const setIsRunning = (running: boolean) => {
+    if (onStatusChange) {
+      onStatusChange(running);
+    } else {
+      setInternalIsRunning(running);
+    }
+  };
+
+  // Debug logging
+  console.log('🎤 VoiceAssistantPanel - externalIsRunning:', externalIsRunning);
+  console.log('🎤 VoiceAssistantPanel - final isRunning:', isRunning);
   const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
   const [testResults, setTestResults] = useState<string[]>([]);
 
@@ -22,10 +46,13 @@ export const VoiceAssistantPanel = () => {
 
   const startVoiceAssistant = async () => {
     try {
-      setIsRunning(true);
       addTestResult('🚀 Starting Voice Assistant...');
       const result = await TauriService.startVoiceAssistant();
       addTestResult('✅ ' + result, 'success');
+      // Optimistically set to true, but let polling handle the real state
+      if (onStatusChange) {
+        onStatusChange(true);
+      }
     } catch (error) {
       addTestResult('❌ Failed to start: ' + error, 'error');
       setIsRunning(false);
@@ -34,10 +61,13 @@ export const VoiceAssistantPanel = () => {
 
   const stopVoiceAssistant = async () => {
     try {
-      setIsRunning(false);
       addTestResult('⏹️ Stopping Voice Assistant...');
       const result = await TauriService.stopVoiceAssistant();
       addTestResult('📴 ' + result, 'info');
+      // Optimistically set to false, but let polling handle the real state
+      if (onStatusChange) {
+        onStatusChange(false);
+      }
     } catch (error) {
       addTestResult('❌ Failed to stop: ' + error, 'error');
     }
