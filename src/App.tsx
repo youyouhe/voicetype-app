@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Mic, Settings, Minus, Keyboard,
   Palette, Sliders, Languages, FileText, Clock, Save, Trash2
@@ -14,7 +14,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 
 // --- Constants ---
 const STORAGE_KEY = 'whisper_input_history';
-const AUTOSAVE_INTERVAL_MS = 5000; // Auto-save every 5 seconds
+
 
 // --- Main App Component ---
 
@@ -28,13 +28,7 @@ const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   
-  // Ref to access latest state inside interval closure
-  const historyRef = useRef(history);
-
-  // Sync ref with state
-  useEffect(() => {
-    historyRef.current = history;
-  }, [history]);
+  
 
   // Load history on mount
   useEffect(() => {
@@ -49,16 +43,14 @@ const App: React.FC = () => {
     }
   }, []);
 
-  // Auto-save Interval
+  // Event-driven auto-save - only save when history changes
   useEffect(() => {
-    const intervalId = setInterval(() => {
-      // Save current state to local storage
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(historyRef.current));
+    // Save to localStorage whenever history changes
+    if (history.length > 0) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(history));
       setLastSaved(new Date());
-    }, AUTOSAVE_INTERVAL_MS);
-
-    return () => clearInterval(intervalId);
-  }, []);
+    }
+  }, [history]);
 
   // Listen for Voice Assistant state changes via events
   useEffect(() => {
