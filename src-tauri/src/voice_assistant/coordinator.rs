@@ -229,7 +229,7 @@ impl VoiceAssistant {
             eprintln!("Failed to initialize logger: {}", e);
         }
 
-        // Load configuration from database
+        // Load configuration from database during initialization
         let config = Self::load_config_from_database().await.unwrap_or_else(|e| {
             println!("⚠️ Failed to load config from database: {}, using default", e);
             VoiceAssistantConfig::default()
@@ -369,10 +369,8 @@ impl VoiceAssistant {
         println!("🚀 === VoiceAssistant Starting ===");
         info!("Starting VoiceAssistant");
         
-        // 🔥 STEP 0: Refresh all configurations from database
-        println!("🔄 Step 0: Refreshing all configurations from database...");
-        self.refresh_all_configs().await?;
-        println!("✅ All configurations refreshed successfully");
+        // STEP 0: Skip refresh - config already loaded during initialization
+        println!("🔄 Step 0: Configuration already loaded during initialization");
         
         // Step 1: Load hotkey configuration from database
         println!("📊 Step 1: Loading hotkey configuration...");
@@ -729,8 +727,19 @@ pub async fn start_voice_assistant() -> Result<String, String> {
                         *va = Some(assistant);
                     }
                     info!("✅ VoiceAssistant started successfully");
-                    // Emit initial state
-                    emit_voice_assistant_state_change(&InputState::Idle);
+                    // Emit "Running" state to indicate VoiceAssistant service is active
+                    // This matches the logic in get_voice_assistant_state()
+                    if let Some(handle_guard) = APP_HANDLE.get() {
+                        if let Ok(app_handle) = handle_guard.lock() {
+                            if let Some(ref handle) = *app_handle {
+                                if let Err(e) = handle.emit("voice-assistant-state-changed", "Running") {
+                                    error!("Failed to emit voice assistant state change event: {}", e);
+                                } else {
+                                    info!("✅ Emitted voice assistant state change: Running");
+                                }
+                            }
+                        }
+                    }
                     Ok("VoiceAssistant started successfully".to_string())
                 }
                 Err(e) => {

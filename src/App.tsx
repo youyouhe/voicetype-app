@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Mic, Settings } from 'lucide-react';
-import { AppStatus } from './types';
+import { AppStatus, HistoryItem } from './types';
 import { StatusIndicator } from './components/MainView/StatusCircle';
-import { LiveData } from './components/MainView/LiveData';
 import { VoiceAssistantPanel } from './components/MainView/VoiceAssistantPanel';
 import { Button } from './components/ui/Button';
 import { SettingsView } from './components/SettingsView';
+import { DashboardView } from './components/DashboardView';
 import { TauriService } from './services/tauriService';
 import { ThemeProvider } from './contexts/ThemeContext';
 
@@ -19,6 +19,23 @@ const App: React.FC = () => {
   const [activeSettingsTab, setActiveSettingsTab] = useState('asr');
   const [isVoiceAssistantRunning, setIsVoiceAssistantRunning] = useState(false);
   const [voiceAssistantState, setVoiceAssistantState] = useState<string>('Idle');
+  
+  // History State
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // History functions
+  const handleClearHistory = () => {
+    setHistory([]);
+    localStorage.removeItem('voice-assistant-history');
+  };
+
+  const startRecording = (type: 'transcribe' | 'translate') => {
+    console.log(`Starting ${type} recording...`);
+    // Implementation will be added later
+  };
+
+  
 
   
   // Map Voice Assistant state to AppStatus
@@ -54,15 +71,22 @@ const App: React.FC = () => {
         console.log('🚀 Getting initial state...');
         const initialState = await TauriService.getVoiceAssistantState();
         console.log('🎯 Initial Voice Assistant state:', initialState);
+        console.log('🔍 State type:', typeof initialState);
+        console.log('🔍 State length:', initialState.length);
+        console.log('🔍 State includes "Running":', initialState.includes('Running'));
         
         const cleanInitialState = initialState.replace(/"/g, '').trim();
+        console.log('🔧 Cleaned initial state:', cleanInitialState);
+
         const isInitiallyRunning = cleanInitialState === 'Running' ||
                                   cleanInitialState === 'Recording' ||
                                   cleanInitialState === 'RecordingTranslate' ||
                                   cleanInitialState === 'Processing' ||
                                   cleanInitialState === 'Translating';
-        
+
         console.log('🟢 Initially running:', isInitiallyRunning);
+        console.log('🔍 Running check - equals Running:', cleanInitialState === 'Running');
+        console.log('🔍 Running check - equals Recording:', cleanInitialState === 'Recording');
         setIsVoiceAssistantRunning(isInitiallyRunning);
         setVoiceAssistantState(cleanInitialState);
         setAppStatus(mapVoiceAssistantStateToAppStatus(cleanInitialState));
@@ -120,8 +144,33 @@ const App: React.FC = () => {
       setAppStatus(AppStatus.Processing);
       const result = await TauriService.startVoiceAssistant();
       console.log('Voice Assistant started:', result);
-      setIsVoiceAssistantRunning(true);
+
+      // Wait a bit for backend to initialize, then check actual state
+      setTimeout(async () => {
+        try {
+          const actualState = await TauriService.getVoiceAssistantState();
+          console.log('🔍 Actual state after start:', actualState);
+          const cleanState = actualState.replace(/"/g, '').trim();
+          const isActuallyRunning = cleanState === 'Running' ||
+                                  cleanState === 'Recording' ||
+                                  cleanState === 'RecordingTranslate' ||
+                                  cleanState === 'Processing' ||
+                                  cleanState === 'Translating';
+
+          console.log('🟢 Actually running after start:', isActuallyRunning);
+          setIsVoiceAssistantRunning(isActuallyRunning);
+          setVoiceAssistantState(cleanState);
+          setAppStatus(mapVoiceAssistantStateToAppStatus(cleanState));
+        } catch (error) {
+          console.error('Failed to verify Voice Assistant state:', error);
+          setIsVoiceAssistantRunning(false);
+          setAppStatus(AppStatus.Error);
+        }
+      }, 500); // Wait 500ms for backend to initialize
+
+      // Set initial processing complete status while waiting for verification
       setAppStatus(AppStatus.Idle);
+
     } catch (error) {
       console.error('Failed to start Voice Assistant:', error);
       setIsVoiceAssistantRunning(false);
@@ -185,18 +234,7 @@ const App: React.FC = () => {
     </header>
   );
 
-  const DashboardView = () => (
-    <div className="max-w-6xl mx-auto px-4 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      {/* Voice Assistant Panel */}
-      <VoiceAssistantPanel
-        isRunning={isVoiceAssistantRunning}
-        onStatusChange={setIsVoiceAssistantRunning}
-      />
-
   
-      <LiveData />
-    </div>
-  );
 
   
 
@@ -204,7 +242,20 @@ const App: React.FC = () => {
     <ThemeProvider>
       <div className="min-h-screen bg-[#F3F4F6] text-gray-900 font-sans selection:bg-primary-100 selection:text-primary-900">
         <TopBar />
-        {currentView === 'dashboard' ? <DashboardView /> : <SettingsView activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} />}
+        {currentView === 'dashboard' ? (
+          <DashboardView
+            appStatus={appStatus}
+            history={history}
+            lastSaved={lastSaved}
+            startRecording={startRecording}
+            handleClearHistory={handleClearHistory}
+            startVoiceAssistant={startVoiceAssistant}
+            stopVoiceAssistant={stopVoiceAssistant}
+            isVoiceAssistantRunning={isVoiceAssistantRunning}
+          />
+        ) : (
+          <SettingsView activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} />
+        )}
         
         {/* Mobile Status Bar (Visible only on small screens) */}
         <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-between items-center z-40">
