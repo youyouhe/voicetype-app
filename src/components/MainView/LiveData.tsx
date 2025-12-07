@@ -204,7 +204,7 @@ export const LiveData: React.FC = () => {
       <InfoCard
         icon={<BarChart3 className="w-5 h-5" />}
         title="Today's Usage"
-        value={usageData ? `${usageData.today_minutes} mins` : '--'}
+        value={usageData ? `${usageData.today_seconds} secs` : '--'}
         subValue={usageData ? (
           <span className="text-xs text-gray-500">
             {usageData.success_rate}% Success ({usageData.successful_requests}/{usageData.total_requests})

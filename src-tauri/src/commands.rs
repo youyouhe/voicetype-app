@@ -1,9 +1,9 @@
-use crate::database::{Database, NewHistoryRecord, ServiceStats, LatencyRecord, UsageLog};
+use crate::database::{Database, NewHistoryRecord};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use chrono::{DateTime, Utc};
+
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {
@@ -50,7 +50,7 @@ pub struct LatencyHistoryPoint {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct UsageDataResponse {
-    pub today_minutes: i64,
+    pub today_seconds: i64,
     pub success_rate: f64,
     pub total_requests: i64,
     pub successful_requests: i64,
@@ -113,6 +113,7 @@ pub struct HotkeyConfigRequest {
     pub trigger_delay_ms: i64,
     pub anti_mistouch_enabled: bool,
     pub save_wav_files: bool,
+    pub typing_delays: crate::database::TypingDelays,
 }
 
 // Initialize database
@@ -312,7 +313,12 @@ pub async fn add_history_record(
             };
 
             match database.add_history_record(record).await {
-                Ok(history) => Ok(history),
+                Ok(history) => {
+                    // Emit events to notify frontend of new data
+                    crate::voice_assistant::coordinator::emit_new_history_record_event();
+                    crate::voice_assistant::coordinator::emit_service_status_updated_event();
+                    Ok(history)
+                },
                 Err(e) => Err(format!("Failed to add history record: {}", e)),
             }
         }
@@ -771,25 +777,49 @@ pub async fn save_hotkey_config(
     db_state: State<'_, DatabaseState>,
     request: HotkeyConfigRequest,
 ) -> Result<crate::database::HotkeyConfig, String> {
+    println!("🔧 Backend: save_hotkey_config() called with request:");
+    println!("  - transcribe_key: {}", request.transcribe_key);
+    println!("  - translate_key: {}", request.translate_key);
+    println!("  - trigger_delay_ms: {}", request.trigger_delay_ms);
+    println!("  - anti_mistouch_enabled: {}", request.anti_mistouch_enabled);
+    println!("  - save_wav_files: {}", request.save_wav_files);
+    println!("  - typing_delays: {:?}", request.typing_delays);
+
     let db = {
         let guard = db_state.lock().unwrap();
         guard.as_ref().cloned()
     };
 
+    println!("🗄️ Database state: {:?}", db.is_some());
+
     match db {
         Some(database) => {
+            println!("📝 Calling database.save_hotkey_config...");
             match database.save_hotkey_config(
                 &request.transcribe_key,
                 &request.translate_key,
                 request.trigger_delay_ms,
                 request.anti_mistouch_enabled,
                 request.save_wav_files,
+                Some(&request.typing_delays),
             ).await {
-                Ok(config) => Ok(config),
-                Err(e) => Err(format!("Failed to save hotkey config: {}", e)),
+                Ok(config) => {
+                    println!("✅ Backend: Hotkey config saved successfully!");
+                    println!("  - Saved config ID: {}", config.id);
+                    println!("  - Saved clipboard_update_ms: {}", config.clipboard_update_ms);
+                    println!("  - Saved keyboard_events_settle_ms: {}", config.keyboard_events_settle_ms);
+                    Ok(config)
+                },
+                Err(e) => {
+                    println!("❌ Backend: Failed to save hotkey config: {}", e);
+                    Err(format!("Failed to save hotkey config: {}", e))
+                },
             }
         }
-        None => Err("Database not initialized".to_string()),
+        None => {
+            println!("❌ Backend: Database not initialized");
+            Err("Database not initialized".to_string())
+        },
     }
 }
 
@@ -1136,11 +1166,67 @@ pub async fn get_translation_config_internal() -> Result<Vec<crate::database::Tr
     }
 }
 
+// Helper function to initialize database directly (without State wrapper)
+pub async fn init_database_direct() -> Result<Database, String> {
+    println!("🚀 Backend: init_database_direct() called");
+    match Database::new().await {
+        Ok(db) => {
+            println!("✅ Backend: Database created successfully");
+            Ok(db)
+        }
+        Err(e) => {
+            eprintln!("❌ Backend: Failed to initialize database: {}", e);
+            Err(format!("Failed to initialize database: {}", e))
+        }
+    }
+}
+
+// ASR result handler command
+#[tauri::command]
+pub async fn handle_asr_result(
+    db_state: State<'_, DatabaseState>,
+    result: crate::voice_assistant::coordinator::AsrResult,
+) -> Result<String, String> {
+    let db = {
+        let guard = db_state.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    match db {
+        Some(database) => {
+            println!("📊 Handling ASR result: success={}, processor={}", result.success, result.processor_type);
+            
+            let record = NewHistoryRecord {
+                record_type: "asr".to_string(),
+                input_text: result.input_text,
+                output_text: Some(result.output_text.clone()),
+                audio_file_path: result.audio_file_path,
+                processor_type: Some(result.processor_type),
+                processing_time_ms: result.processing_time_ms,
+                success: result.success,
+                error_message: result.error_message,
+            };
+
+            match database.add_history_record(record).await {
+                Ok(_) => {
+                    println!("✅ ASR result saved to database");
+                    Ok("ASR result saved successfully".to_string())
+                }
+                Err(e) => {
+                    println!("❌ Failed to save ASR result: {}", e);
+                    Err(format!("Failed to save ASR result: {}", e))
+                }
+            }
+        }
+        None => Err("Database not initialized".to_string())
+    }
+}
+
 // Live Data commands
 #[tauri::command]
 pub async fn get_service_status(
     service_name: Option<String>,
-    db_state: State<'DatabaseState'>
+    db_state: State<'_, DatabaseState>
 ) -> Result<ServiceStatusResponse, String> {
     let db = {
         let guard = db_state.lock().unwrap();
@@ -1153,7 +1239,7 @@ pub async fn get_service_status(
             println!("🔍 Getting service status for: {}", service);
 
             match database.get_service_status(&service).await {
-                Some(stats) => {
+                Ok(Some(stats)) => {
                     println!("✅ Service status found: {} ({})", stats.service_name, stats.status);
                     Ok(ServiceStatusResponse {
                         active_service: stats.service_name,
@@ -1161,7 +1247,7 @@ pub async fn get_service_status(
                         endpoint: stats.endpoint,
                     })
                 }
-                None => {
+                Ok(None) => {
                     // Return default status if not found
                     println!("⚠️ No service status found, returning default");
                     Ok(ServiceStatusResponse {
@@ -1169,6 +1255,10 @@ pub async fn get_service_status(
                         status: "offline".to_string(),
                         endpoint: None,
                     })
+                }
+                Err(e) => {
+                    println!("❌ Failed to get service status: {}", e);
+                    Err(format!("Failed to get service status: {}", e))
                 }
             }
         }
@@ -1179,7 +1269,7 @@ pub async fn get_service_status(
 #[tauri::command]
 pub async fn get_latency_data(
     service_name: Option<String>,
-    db_state: State<'DatabaseState'>
+    db_state: State<'_, DatabaseState>
 ) -> Result<LatencyDataResponse, String> {
     let db = {
         let guard = db_state.lock().unwrap();
@@ -1261,7 +1351,7 @@ pub async fn get_latency_data(
 
 #[tauri::command]
 pub async fn get_usage_data(
-    db_state: State<'DatabaseState'>
+    db_state: State<'_, DatabaseState>
 ) -> Result<UsageDataResponse, String> {
     let db = {
         let guard = db_state.lock().unwrap();
@@ -1273,29 +1363,33 @@ pub async fn get_usage_data(
             println!("🔍 Getting today's usage data");
 
             match database.get_today_usage().await {
-                Some(usage) => {
+                Ok(Some(usage)) => {
                     let success_rate = if usage.total_requests > 0 {
                         (usage.successful_requests as f64 / usage.total_requests as f64) * 100.0
                     } else {
                         0.0
                     };
 
-                    println!("✅ Usage data: {} mins, {:.1}% success rate", usage.total_minutes, success_rate);
+                    println!("✅ Usage data: {} secs, {:.1}% success rate", usage.total_seconds, success_rate);
                     Ok(UsageDataResponse {
-                        today_minutes: usage.total_minutes,
+                        today_seconds: usage.total_seconds,
                         success_rate,
                         total_requests: usage.total_requests,
                         successful_requests: usage.successful_requests,
                     })
                 }
-                None => {
+                Ok(None) => {
                     println!("⚠️ No usage data found for today");
                     Ok(UsageDataResponse {
-                        today_minutes: 0,
+                        today_seconds: 0,
                         success_rate: 0.0,
                         total_requests: 0,
                         successful_requests: 0,
                     })
+                }
+                Err(e) => {
+                    println!("❌ Failed to get usage data: {}", e);
+                    Err(format!("Failed to get usage data: {}", e))
                 }
             }
         }
