@@ -216,10 +216,11 @@ const App: React.FC = () => {
             icon={<Mic className="w-4 h-4"/>}
             onClick={isVoiceAssistantRunning ? stopVoiceAssistant : startVoiceAssistant}
             disabled={appStatus === AppStatus.Recording || appStatus === AppStatus.Processing}
-            className="hidden md:flex"
+            className="flex"
             title={isVoiceAssistantRunning ? "Stop Voice Assistant" : "Start Voice Assistant"}
           >
-            {isVoiceAssistantRunning ? 'Stop' : 'Start'}
+            <span className="hidden sm:inline">{isVoiceAssistantRunning ? 'Stop' : 'Start'}</span>
+            <span className="sm:hidden">{isVoiceAssistantRunning ? 'Stop' : '▶'}</span>
           </Button>
           <Button
             variant="ghost"

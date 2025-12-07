@@ -28,7 +28,7 @@ export interface LatencyData {
 }
 
 export interface UsageData {
-  today_minutes: number;
+  today_seconds: number;
   success_rate: number;
   total_requests: number;
   successful_requests: number;

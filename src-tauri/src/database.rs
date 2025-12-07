@@ -19,6 +19,27 @@ pub struct AsrConfig {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TypingDelays {
+    pub clipboard_update_ms: i64,
+    pub keyboard_events_settle_ms: i64,
+    pub typing_complete_ms: i64,
+    pub character_interval_ms: i64,
+    pub short_operation_ms: i64,
+}
+
+impl Default for TypingDelays {
+    fn default() -> Self {
+        Self {
+            clipboard_update_ms: 100,
+            keyboard_events_settle_ms: 300,
+            typing_complete_ms: 500,
+            character_interval_ms: 100,
+            short_operation_ms: 100,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct HotkeyConfig {
     pub id: String,
@@ -27,6 +48,11 @@ pub struct HotkeyConfig {
     pub trigger_delay_ms: i64,
     pub anti_mistouch_enabled: bool,
     pub save_wav_files: bool,
+    pub clipboard_update_ms: i64,
+    pub keyboard_events_settle_ms: i64,
+    pub typing_complete_ms: i64,
+    pub character_interval_ms: i64,
+    pub short_operation_ms: i64,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -96,7 +122,7 @@ pub struct LatencyRecord {
 pub struct UsageLog {
     pub id: String,
     pub date: String, // YYYY-MM-DD format
-    pub total_minutes: i64,
+    pub total_seconds: i64,
     pub total_requests: i64,
     pub successful_requests: i64,
     pub failed_requests: i64,
@@ -125,7 +151,7 @@ pub struct NewLatencyRecord {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewUsageLog {
     pub date: String,
-    pub total_minutes: i64,
+    pub total_seconds: i64,
     pub total_requests: i64,
     pub successful_requests: i64,
     pub failed_requests: i64,
@@ -267,6 +293,83 @@ impl Database {
         .await
         .ok(); // Ignore error if column already exists
 
+        // Migrate usage_logs table from total_minutes to total_seconds if needed
+        // First, check if total_seconds column exists
+        let column_exists = sqlx::query_scalar::<_, bool>(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('usage_logs') WHERE name = 'total_seconds'"
+        )
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false);
+
+        if !column_exists {
+            println!("🔄 Database: Migrating usage_logs table from total_minutes to total_seconds");
+            
+            // Add total_seconds column
+            sqlx::query(
+                "ALTER TABLE usage_logs ADD COLUMN total_seconds INTEGER NOT NULL DEFAULT 0"
+            )
+            .execute(&self.pool)
+            .await
+            .ok(); // Ignore error if column already exists
+            
+            // Migrate data from total_minutes to total_seconds (multiply by 60)
+            sqlx::query(
+                "UPDATE usage_logs SET total_seconds = total_minutes * 60 WHERE total_minutes > 0"
+            )
+            .execute(&self.pool)
+            .await
+            .ok();
+            
+            println!("✅ Database: Migration from total_minutes to total_seconds completed");
+        }
+
+        // Add typing delays columns if they don't exist (for existing databases)
+        sqlx::query(
+            r#"
+            ALTER TABLE hotkey_configs ADD COLUMN clipboard_update_ms INTEGER NOT NULL DEFAULT 100
+            "#
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        sqlx::query(
+            r#"
+            ALTER TABLE hotkey_configs ADD COLUMN keyboard_events_settle_ms INTEGER NOT NULL DEFAULT 300
+            "#
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        sqlx::query(
+            r#"
+            ALTER TABLE hotkey_configs ADD COLUMN typing_complete_ms INTEGER NOT NULL DEFAULT 500
+            "#
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        sqlx::query(
+            r#"
+            ALTER TABLE hotkey_configs ADD COLUMN character_interval_ms INTEGER NOT NULL DEFAULT 100
+            "#
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        sqlx::query(
+            r#"
+            ALTER TABLE hotkey_configs ADD COLUMN short_operation_ms INTEGER NOT NULL DEFAULT 100
+            "#
+        )
+        .execute(&self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
         // Create service stats table
         sqlx::query(
             r#"
@@ -309,7 +412,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS usage_logs (
                 id TEXT PRIMARY KEY,
                 date TEXT NOT NULL UNIQUE,
-                total_minutes INTEGER NOT NULL DEFAULT 0,
+                total_seconds INTEGER NOT NULL DEFAULT 0,
                 total_requests INTEGER NOT NULL DEFAULT 0,
                 successful_requests INTEGER NOT NULL DEFAULT 0,
                 failed_requests INTEGER NOT NULL DEFAULT 0,
@@ -356,10 +459,22 @@ impl Database {
         trigger_delay_ms: i64,
         anti_mistouch_enabled: bool,
         save_wav_files: bool,
+        typing_delays: Option<&TypingDelays>,
     ) -> Result<HotkeyConfig, sqlx::Error> {
         let now = Utc::now();
 
+        let default_delays = TypingDelays::default();
+        let delays = typing_delays.unwrap_or(&default_delays);
+
+        // Check if columns exist by attempting a query first
+        // The columns should already exist from migrations, so we skip ALTER TABLE attempts
+
         // First, try to update existing record
+        println!("🔄 Database: Attempting to update existing record...");
+        println!("  - transcribe_key: {}", transcribe_key);
+        println!("  - clipboard_update_ms: {}", delays.clipboard_update_ms);
+        println!("  - keyboard_events_settle_ms: {}", delays.keyboard_events_settle_ms);
+
         let update_result = sqlx::query_as::<_, HotkeyConfig>(
             r#"
             UPDATE hotkey_configs
@@ -368,7 +483,12 @@ impl Database {
                 trigger_delay_ms = $3,
                 anti_mistouch_enabled = $4,
                 save_wav_files = $5,
-                updated_at = $6
+                clipboard_update_ms = $6,
+                keyboard_events_settle_ms = $7,
+                typing_complete_ms = $8,
+                character_interval_ms = $9,
+                short_operation_ms = $10,
+                updated_at = $11
             WHERE id = (SELECT id FROM hotkey_configs ORDER BY updated_at DESC LIMIT 1)
             RETURNING *
             "#
@@ -378,25 +498,35 @@ impl Database {
         .bind(trigger_delay_ms)
         .bind(anti_mistouch_enabled)
         .bind(save_wav_files)
+        .bind(delays.clipboard_update_ms)
+        .bind(delays.keyboard_events_settle_ms)
+        .bind(delays.typing_complete_ms)
+        .bind(delays.character_interval_ms)
+        .bind(delays.short_operation_ms)
         .bind(now)
         .fetch_optional(&self.pool)
         .await?;
 
         if let Some(config) = update_result {
             info!("Updated hotkey config");
-            println!("✅ Database: Updated hotkey config with new shortcuts");
+            println!("✅ Database: Successfully updated hotkey config!");
+            println!("  - Updated clipboard_update_ms: {}", config.clipboard_update_ms);
+            println!("  - Updated keyboard_events_settle_ms: {}", config.keyboard_events_settle_ms);
+            println!("  - Updated typing_complete_ms: {}", config.typing_complete_ms);
+            println!("  - Updated character_interval_ms: {}", config.character_interval_ms);
+            println!("  - Updated short_operation_ms: {}", config.short_operation_ms);
             Ok(config)
         } else {
             // If no existing record, insert new one
-            println!("⚠️ Database: No hotkey config found, creating new one...");
+            println!("⚠️ Database: No existing hotkey config found, creating new one...");
             let id = Uuid::new_v4().to_string();
             println!("🆔 Database: New hotkey config ID: {}", id);
             println!("💾 Database: Inserting transcribe_key: {}, translate_key: {}", transcribe_key, translate_key);
 
             let config = sqlx::query_as::<_, HotkeyConfig>(
                 r#"
-                INSERT INTO hotkey_configs (id, transcribe_key, translate_key, trigger_delay_ms, anti_mistouch_enabled, save_wav_files, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO hotkey_configs (id, transcribe_key, translate_key, trigger_delay_ms, anti_mistouch_enabled, save_wav_files, clipboard_update_ms, keyboard_events_settle_ms, typing_complete_ms, character_interval_ms, short_operation_ms, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
                 RETURNING *
                 "#
             )
@@ -406,6 +536,11 @@ impl Database {
             .bind(trigger_delay_ms)
             .bind(anti_mistouch_enabled)
             .bind(save_wav_files)
+            .bind(delays.clipboard_update_ms)
+            .bind(delays.keyboard_events_settle_ms)
+            .bind(delays.typing_complete_ms)
+            .bind(delays.character_interval_ms)
+            .bind(delays.short_operation_ms)
             .bind(now)
             .bind(now)
             .fetch_one(&self.pool)
@@ -635,8 +770,8 @@ impl Database {
 
     // Helper function to update usage from a new history record
     async fn update_usage_from_record(&self, record: &NewHistoryRecord, timestamp: chrono::DateTime<chrono::Utc>) -> Result<(), sqlx::Error> {
-        // Update today's usage (calculate minutes from processing time)
-        let minutes_today = (record.processing_time_ms.unwrap_or(0) as f64 / 60000.0).ceil() as i32;
+        // Update today's usage (calculate seconds from processing time)
+        let seconds_today = (record.processing_time_ms.unwrap_or(0) / 1000).max(1); // Convert ms to seconds, at least 1 second
         
         // Update or insert today's usage record
         let today = timestamp.format("%Y-%m-%d").to_string();
@@ -644,11 +779,11 @@ impl Database {
         
         sqlx::query(
             r#"
-            INSERT OR REPLACE INTO usage_logs (id, date, total_minutes, total_requests, successful_requests)
+            INSERT OR REPLACE INTO usage_logs (id, date, total_seconds, total_requests, successful_requests)
             VALUES (
                 $1,
                 $2,
-                COALESCE((SELECT total_minutes FROM usage_logs WHERE date = $2), 0) + $3,
+                COALESCE((SELECT total_seconds FROM usage_logs WHERE date = $2), 0) + $3,
                 COALESCE((SELECT total_requests FROM usage_logs WHERE date = $2), 0) + 1,
                 COALESCE((SELECT successful_requests FROM usage_logs WHERE date = $2), 0) + $4
             )
@@ -656,7 +791,7 @@ impl Database {
         )
         .bind(&id)
         .bind(&today)
-        .bind(minutes_today)
+        .bind(seconds_today)
         .bind(if record.success { 1 } else { 0 })
         .execute(&self.pool)
         .await?;
