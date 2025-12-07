@@ -8,7 +8,7 @@ import { StatusCircle, StatusIndicator } from './components/MainView/StatusCircl
 import { LiveData } from './components/MainView/LiveData';
 import { VoiceAssistantPanel } from './components/MainView/VoiceAssistantPanel';
 import { Button } from './components/ui/Button';
-import { ASRSettings, ShortcutSettings, PlaceholderSettings } from './components/SettingsView/SettingsContent';
+import { SettingsView } from './components/SettingsView';
 import { TauriService } from './services/tauriService';
 
 // --- Constants ---
@@ -59,46 +59,69 @@ const App: React.FC = () => {
     return () => clearInterval(intervalId);
   }, []);
 
-  // Poll Voice Assistant state every second
+  // Listen for Voice Assistant state changes via events
   useEffect(() => {
-    console.log('🔧 Setting up Voice Assistant state polling...');
+    console.log('🔧 Setting up Voice Assistant state event listener...');
 
-    const pollVoiceAssistantState = async () => {
+    // Import the listen function dynamically
+    const setupEventListener = async () => {
       try {
-        console.log('🔄 Polling Voice Assistant state...');
-        const state = await TauriService.getVoiceAssistantState();
-        console.log('🔄 Voice Assistant state:', state);
+        const { listen } = await import('@tauri-apps/api/event');
+        
+        // Initial state check
+        console.log('🚀 Getting initial state...');
+        const initialState = await TauriService.getVoiceAssistantState();
+        console.log('🎯 Initial Voice Assistant state:', initialState);
+        
+        const cleanInitialState = initialState.replace(/"/g, '').trim();
+        const isInitiallyRunning = cleanInitialState === 'Running' ||
+                                  cleanInitialState === 'Recording' ||
+                                  cleanInitialState === 'RecordingTranslate' ||
+                                  cleanInitialState === 'Processing' ||
+                                  cleanInitialState === 'Translating';
+        
+        console.log('🟢 Initially running:', isInitiallyRunning);
+        setIsVoiceAssistantRunning(isInitiallyRunning);
 
-        // Check if Voice Assistant is running based on state
-        const cleanState = state.replace(/"/g, '').trim();
-        console.log('🧹 Cleaned state:', cleanState);
+        // Set up event listener for state changes
+        console.log('👂 Setting up event listener for voice-assistant-state-changed...');
+        const unlisten = await listen<string>('voice-assistant-state-changed', (event) => {
+          console.log('📡 Received voice assistant state change event:', event.payload);
+          
+          const newState = event.payload;
+          const isRunning = newState === 'Running' ||
+                           newState === 'Recording' ||
+                           newState === 'RecordingTranslate' ||
+                           newState === 'Processing' ||
+                           newState === 'Translating';
+          
+          console.log('🟢 Updated is running:', isRunning);
+          setIsVoiceAssistantRunning(isRunning);
+        });
 
-        // VoiceAssistant is running if state is Running or any active state
-        const isRunning = cleanState === 'Running' ||
-                         cleanState === 'Recording' ||
-                         cleanState === 'RecordingTranslate' ||
-                         cleanState === 'Processing' ||
-                         cleanState === 'Translating';
+        console.log('✅ Voice Assistant state event listener set up successfully');
 
-        console.log('🟢 Is running:', isRunning);
-        setIsVoiceAssistantRunning(isRunning);
+        return unlisten;
       } catch (error) {
-        console.error('❌ Failed to get Voice Assistant state:', error);
-        setIsVoiceAssistantRunning(false);
+        console.error('❌ Failed to set up Voice Assistant state event listener:', error);
+        return () => {}; // Return empty cleanup function
       }
     };
 
-    // Initial poll
-    console.log('🚀 Starting initial state poll...');
-    pollVoiceAssistantState();
+    let unlistenHandler: (() => void) | undefined;
 
-    // Set up interval for polling
-    const intervalId = setInterval(pollVoiceAssistantState, 1000);
-    console.log('⏰ State polling interval set up (1000ms)');
+    const setupCleanup = async () => {
+      const unlisten = await setupEventListener();
+      unlistenHandler = unlisten;
+    };
+
+    setupCleanup();
 
     return () => {
-      console.log('🛑 Cleaning up state polling...');
-      clearInterval(intervalId);
+      console.log('🛑 Cleaning up Voice Assistant state event listener...');
+      if (unlistenHandler) {
+        unlistenHandler();
+      }
     };
   }, []);
 
@@ -356,56 +379,12 @@ const App: React.FC = () => {
     </div>
   );
 
-  const SettingsView = () => {
-    const tabs: NavTab[] = [
-      { id: 'asr', label: 'ASR Service', icon: Mic },
-      { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-      { id: 'appearance', label: 'Appearance', icon: Palette },
-      { id: 'advanced', label: 'Advanced', icon: Sliders },
-    ];
-
-    return (
-      <div className="max-w-6xl mx-auto px-4 py-8 flex flex-col md:flex-row gap-8 animate-in fade-in duration-300">
-        {/* Sidebar */}
-        <aside className="w-full md:w-64 flex-shrink-0">
-          <nav className="space-y-1">
-            {tabs.map((tab) => {
-              const Icon = tab.icon;
-              const isActive = activeSettingsTab === tab.id;
-              return (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveSettingsTab(tab.id)}
-                  className={`
-                    w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200
-                    ${isActive 
-                      ? 'bg-white text-primary-600 shadow-sm ring-1 ring-gray-200' 
-                      : 'text-gray-600 hover:bg-white/60 hover:text-gray-900'}
-                  `}
-                >
-                  <Icon className={`w-5 h-5 ${isActive ? 'text-primary-500' : 'text-gray-400'}`} />
-                  <span>{tab.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        {/* Content Area */}
-        <main className="flex-1 min-h-[500px]">
-          {activeSettingsTab === 'asr' && <ASRSettings />}
-          {activeSettingsTab === 'shortcuts' && <ShortcutSettings />}
-          {activeSettingsTab === 'appearance' && <PlaceholderSettings title="Appearance" />}
-          {activeSettingsTab === 'advanced' && <PlaceholderSettings title="Advanced Configuration" />}
-        </main>
-      </div>
-    );
-  };
+  
 
   return (
     <div className="min-h-screen bg-[#F3F4F6] text-gray-900 font-sans selection:bg-primary-100 selection:text-primary-900">
       <TopBar />
-      {currentView === 'dashboard' ? <DashboardView /> : <SettingsView />}
+      {currentView === 'dashboard' ? <DashboardView /> : <SettingsView activeSettingsTab={activeSettingsTab} setActiveSettingsTab={setActiveSettingsTab} />}
       
       {/* Mobile Status Bar (Visible only on small screens) */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-between items-center z-40">
