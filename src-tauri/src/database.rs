@@ -578,7 +578,90 @@ impl Database {
         .fetch_one(&self.pool)
         .await?;
 
+        // Update service statistics after successful history record addition
+        if record.success {
+            self.update_service_stats_from_record(&record, now).await?;
+            self.update_latency_from_record(&record, now).await?;
+            self.update_usage_from_record(&record, now).await?;
+        }
+
         Ok(history)
+    }
+
+    // Helper function to update service stats from a new history record
+    async fn update_service_stats_from_record(&self, record: &NewHistoryRecord, _timestamp: chrono::DateTime<chrono::Utc>) -> Result<(), sqlx::Error> {
+        let service_name = match record.processor_type.as_deref() {
+            Some("whisper") => "whisper_asr",
+            Some("sensevoice") => "sensevoice_asr", 
+            Some("local") => "local_asr",
+            Some("siliconflow") => "siliconflow_translation",
+            Some("ollama") => "ollama_translation",
+            _ => "unknown_service",
+        };
+
+        let status = if record.success { "online" } else { "error" };
+        
+        self.update_service_status(service_name, status, None).await?;
+        Ok(())
+    }
+
+    // Helper function to update latency from a new history record
+    async fn update_latency_from_record(&self, record: &NewHistoryRecord, timestamp: chrono::DateTime<chrono::Utc>) -> Result<(), sqlx::Error> {
+        let service_name = match record.processor_type.as_deref() {
+            Some("whisper") => "whisper_asr",
+            Some("sensevoice") => "sensevoice_asr",
+            Some("local") => "local_asr",
+            _ => "unknown_service",
+        };
+
+        // Insert latency record
+        let id = Uuid::new_v4().to_string();
+        sqlx::query(
+            r#"
+            INSERT INTO latency_records (id, service_name, latency_ms, request_type, recorded_at)
+            VALUES ($1, $2, $3, $4, $5)
+            "#
+        )
+        .bind(&id)
+        .bind(service_name)
+        .bind(record.processing_time_ms.unwrap_or(0))
+        .bind(&record.record_type)
+        .bind(timestamp)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    // Helper function to update usage from a new history record
+    async fn update_usage_from_record(&self, record: &NewHistoryRecord, timestamp: chrono::DateTime<chrono::Utc>) -> Result<(), sqlx::Error> {
+        // Update today's usage (calculate minutes from processing time)
+        let minutes_today = (record.processing_time_ms.unwrap_or(0) as f64 / 60000.0).ceil() as i32;
+        
+        // Update or insert today's usage record
+        let today = timestamp.format("%Y-%m-%d").to_string();
+        let id = Uuid::new_v4().to_string();
+        
+        sqlx::query(
+            r#"
+            INSERT OR REPLACE INTO usage_logs (id, date, total_minutes, total_requests, successful_requests)
+            VALUES (
+                $1,
+                $2,
+                COALESCE((SELECT total_minutes FROM usage_logs WHERE date = $2), 0) + $3,
+                COALESCE((SELECT total_requests FROM usage_logs WHERE date = $2), 0) + 1,
+                COALESCE((SELECT successful_requests FROM usage_logs WHERE date = $2), 0) + $4
+            )
+            "#
+        )
+        .bind(&id)
+        .bind(&today)
+        .bind(minutes_today)
+        .bind(if record.success { 1 } else { 0 })
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     pub async fn get_history_records(

@@ -67,14 +67,58 @@ export const LiveData: React.FC = () => {
     }
   };
 
-  // Initial load and periodic updates
+  // Initial load and event-driven updates
   useEffect(() => {
+    // Load initial data
     fetchLiveData();
 
-    // Update every 10 seconds
-    const interval = setInterval(fetchLiveData, 10000);
+    // Listen for live data updates from backend
+    const setupEventListeners = async () => {
+      if (window.__TAURI__) {
+        console.log('🔧 [Frontend] Setting up event listeners for live data...');
+        const { listen } = await import('@tauri-apps/api/event');
+        
+        // Listen for new history record events
+        const unlistenHistory = await listen('new-history-record', () => {
+          console.log('📊 New history record detected, refreshing live data');
+          fetchLiveData();
+        });
 
-    return () => clearInterval(interval);
+        // Listen for voice assistant state changes
+        const unlistenState = await listen('voice-assistant-state-changed', () => {
+          console.log('🔄 Voice assistant state changed, refreshing live data');
+          fetchLiveData();
+        });
+
+        // Listen for service status updates
+        const unlistenService = await listen('service-status-updated', () => {
+          console.log('🔧 Service status updated, refreshing live data');
+          fetchLiveData();
+        });
+
+        // Listen for ASR result events (just for refresh, no need to save)
+        const unlistenAsrResult = await listen('asr-result-complete', (result) => {
+          console.log('🎯 [Frontend] ASR result event received, refreshing data:', result.output_text);
+          // Data is automatically saved by backend, just refresh display
+          fetchLiveData();
+        });
+
+        // Cleanup listeners on unmount
+        return () => {
+          unlistenHistory();
+          unlistenState();
+          unlistenService();
+          unlistenAsrResult();
+        };
+      }
+      return () => {};
+    };
+
+    const cleanup = setupEventListeners();
+
+    return () => {
+      cleanup.then(fn => fn());
+    };
   }, []);
 
   const getStatusBadge = (status: string) => {

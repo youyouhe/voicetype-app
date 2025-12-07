@@ -130,7 +130,7 @@ impl KeyboardManager {
                         
                         // 检查转录热键
                         if let Some(ref transcribe_hotkey) = *transcribe_hotkey_guard {
-                            if transcribe_hotkey.matches(&keys) && current_state.can_start_recording() && !recording_started {
+                            if transcribe_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started {
                                 // 检查按键持续时间（防误触）
                                 let current_time = Instant::now();
                                 let should_trigger = if let Some(press_time) = hotkey_press_time {
@@ -149,6 +149,8 @@ impl KeyboardManager {
 
                                     *hotkey_start_time.lock().unwrap() = Some(Instant::now());
                                     *state.lock().unwrap() = InputState::Recording; // Start recording state
+                                    // Emit state change event
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Recording);
                                     recording_started = true;
                                     hotkey_press_time = None; // 重置按键时间
                                 }
@@ -165,7 +167,7 @@ impl KeyboardManager {
                         
                         // 检查翻译热键
                         if let Some(ref translate_hotkey) = *translate_hotkey_guard {
-                            if translate_hotkey.matches(&keys) && current_state.can_start_recording() && !recording_started {
+                            if translate_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started {
                                 // 检查按键持续时间（防误触）
                                 let current_time = Instant::now();
                                 let should_trigger = if let Some(press_time) = hotkey_press_time {
@@ -184,6 +186,8 @@ impl KeyboardManager {
 
                                     *hotkey_start_time.lock().unwrap() = Some(Instant::now());
                                     *state.lock().unwrap() = InputState::RecordingTranslate; // Start recording translate state
+                                    // Emit state change event
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::RecordingTranslate);
                                     recording_started = true;
                                     hotkey_press_time = None; // 重置按键时间
                                 }
@@ -215,10 +219,14 @@ impl KeyboardManager {
                                 InputState::Recording => {
                                     println!("🎤 Transcribe hotkey released - switching to Processing state...");
                                     *state.lock().unwrap() = InputState::Processing;
+                                    // Emit state change event
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Processing);
                                 }
                                 InputState::RecordingTranslate => {
                                     println!("🌐 Translate hotkey released - switching to Translating state...");
                                     *state.lock().unwrap() = InputState::Translating;
+                                    // Emit state change event
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Translating);
                                 }
                                 _ => {}
                             }
@@ -306,6 +314,31 @@ impl KeyboardManager {
                             // Use the ASR result
                             if let Some(result_text) = asr_result {
                                 println!("⌨️ Typing ASR result: \"{}\"", result_text);
+                                
+                                // Calculate processing time
+                                let processing_time = if let Some(start_time) = hotkey_start_time.lock().unwrap().as_ref() {
+                                    Some(start_time.elapsed().as_millis() as i64)
+                                } else {
+                                    None
+                                };
+                                
+                                // Use tokio runtime to save to database
+                                if let Ok(tokio_rt) = tokio::runtime::Runtime::new() {
+                                    let result_text_clone = result_text.clone();
+                                    let processor_type = _asr_processor.get_processor_type().unwrap_or("unknown").to_string();
+                                    tokio_rt.block_on(async move {
+                                        crate::voice_assistant::coordinator::save_asr_result_directly(
+                                            result_text_clone,
+                                            &processor_type,
+                                            processing_time,
+                                            true,
+                                            None
+                                        ).await;
+                                    });
+                                    
+                                    println!("✅ Database save operation completed");
+                                }
+                                
                                 Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result_text, None);
                                 println!("✅ ASR result typing completed");
                             }
@@ -318,6 +351,8 @@ impl KeyboardManager {
                             recording_started = false;
                             *hotkey_start_time.lock().unwrap() = None;
                             *state.lock().unwrap() = InputState::Idle;
+                        // Emit state change event
+                        crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Idle);
                         }
                         InputState::Translating => {
                             // Skip audio recording and use mock translation text directly
@@ -346,6 +381,8 @@ impl KeyboardManager {
                             recording_started = false;
                             *hotkey_start_time.lock().unwrap() = None;
                             *state.lock().unwrap() = InputState::Idle;
+                        // Emit state change event
+                        crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Idle);
                         }
                         _ => {}
                     }
