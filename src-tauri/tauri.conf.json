@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "hello-tauri",
+  "productName": "Flash-Input",
   "version": "0.1.0",
-  "identifier": "com.martin.hello-tauri",
+  "identifier": "com.martin.flash-input",
   "build": {
     "beforeDevCommand": "cd src && npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,9 +13,10 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "hello-tauri",
+        "title": "Flash-Input",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "devtools": true
       }
     ],
     "security": {
