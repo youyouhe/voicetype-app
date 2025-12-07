@@ -21,7 +21,8 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'dashboard' | 'settings'>('dashboard');
   const [appStatus, setAppStatus] = useState<AppStatus>(AppStatus.Idle);
   const [activeSettingsTab, setActiveSettingsTab] = useState('asr');
-  
+  const [isVoiceAssistantRunning, setIsVoiceAssistantRunning] = useState(false);
+
   // History State
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
@@ -56,6 +57,49 @@ const App: React.FC = () => {
     }, AUTOSAVE_INTERVAL_MS);
 
     return () => clearInterval(intervalId);
+  }, []);
+
+  // Poll Voice Assistant state every second
+  useEffect(() => {
+    console.log('🔧 Setting up Voice Assistant state polling...');
+
+    const pollVoiceAssistantState = async () => {
+      try {
+        console.log('🔄 Polling Voice Assistant state...');
+        const state = await TauriService.getVoiceAssistantState();
+        console.log('🔄 Voice Assistant state:', state);
+
+        // Check if Voice Assistant is running based on state
+        const cleanState = state.replace(/"/g, '').trim();
+        console.log('🧹 Cleaned state:', cleanState);
+
+        // VoiceAssistant is running if state is Running or any active state
+        const isRunning = cleanState === 'Running' ||
+                         cleanState === 'Recording' ||
+                         cleanState === 'RecordingTranslate' ||
+                         cleanState === 'Processing' ||
+                         cleanState === 'Translating';
+
+        console.log('🟢 Is running:', isRunning);
+        setIsVoiceAssistantRunning(isRunning);
+      } catch (error) {
+        console.error('❌ Failed to get Voice Assistant state:', error);
+        setIsVoiceAssistantRunning(false);
+      }
+    };
+
+    // Initial poll
+    console.log('🚀 Starting initial state poll...');
+    pollVoiceAssistantState();
+
+    // Set up interval for polling
+    const intervalId = setInterval(pollVoiceAssistantState, 1000);
+    console.log('⏰ State polling interval set up (1000ms)');
+
+    return () => {
+      console.log('🛑 Cleaning up state polling...');
+      clearInterval(intervalId);
+    };
   }, []);
 
   const handleClearHistory = () => {
@@ -143,10 +187,12 @@ const App: React.FC = () => {
       setAppStatus(AppStatus.Processing);
       const result = await TauriService.startVoiceAssistant();
       console.log('Voice Assistant started:', result);
+      setIsVoiceAssistantRunning(true);
       setAppStatus(AppStatus.Idle);
     } catch (error) {
       console.error('Failed to start Voice Assistant:', error);
-      setAppStatus(AppStatus.Idle);
+      setIsVoiceAssistantRunning(false);
+      setAppStatus(AppStatus.Error);
     }
   };
 
@@ -155,10 +201,12 @@ const App: React.FC = () => {
       setAppStatus(AppStatus.Processing);
       const result = await TauriService.stopVoiceAssistant();
       console.log('Voice Assistant stopped:', result);
+      setIsVoiceAssistantRunning(false);
       setAppStatus(AppStatus.Idle);
     } catch (error) {
       console.error('Failed to stop Voice Assistant:', error);
-      setAppStatus(AppStatus.Idle);
+      setIsVoiceAssistantRunning(false);
+      setAppStatus(AppStatus.Error);
     }
   };
 
@@ -207,7 +255,10 @@ const App: React.FC = () => {
   const DashboardView = () => (
     <div className="max-w-6xl mx-auto px-4 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Voice Assistant Panel */}
-      <VoiceAssistantPanel />
+      <VoiceAssistantPanel
+        isRunning={isVoiceAssistantRunning}
+        onStatusChange={setIsVoiceAssistantRunning}
+      />
 
       {/* Main Status Card */}
       <div className="bg-white rounded-2xl shadow-lg shadow-gray-200/50 p-8 mb-8 border border-white">
