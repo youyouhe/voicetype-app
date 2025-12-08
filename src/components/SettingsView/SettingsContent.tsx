@@ -7,7 +7,7 @@ import { Button } from '../ui/Button';
 import { DatabaseService, AsrConfigRequest, StorageMigration } from '../../services/database';
 import { configManager } from '../../services/configManager';
 import { invoke } from '@tauri-apps/api/core';
-import { HotkeyConfig, HotkeyConfigRequest } from '../../types';
+import { HotkeyConfig, HotkeyConfigRequest, TypingDelays } from '../../types';
 
 // Service Option Component
 const ServiceOption: React.FC<ServiceOptionProps> = ({ id, title, description, icon, selected, onSelect, disabled = false }) => (
@@ -457,26 +457,37 @@ export const ASRSettings: React.FC = () => {
     }
 
     try {
-      // Save current configuration first
-      await saveConfiguration();
+      let config;
 
-      // Get current config
-      const config = await DatabaseService.getAsrConfig();
-      if (!config) {
-        setAsrTestMessage('No configuration found');
-        return;
+      // For Local Whisper, no configuration needed
+      if (selectedService === ServiceProvider.Local) {
+        config = {
+          service_provider: 'local'
+        };
+        addDebugLog('🔧 Testing Local Whisper - no configuration needed');
+      } else {
+        // Save current configuration first for Cloud ASR
+        await saveConfiguration();
+
+        // Get current config
+        const dbConfig = await DatabaseService.getAsrConfig();
+        if (!dbConfig) {
+          setAsrTestMessage('No configuration found for Cloud ASR');
+          return;
+        }
+        config = dbConfig;
       }
 
-      // Determine endpoint and API key
+      // Determine endpoint and API key (only for Cloud ASR)
       const endpoint = config.service_provider === 'local'
-        ? config.local_endpoint
+        ? null // Not used for Local Whisper
         : config.cloud_endpoint;
       const apiKey = config.service_provider === 'local'
-        ? config.local_api_key
+        ? null // Not used for Local Whisper
         : config.cloud_api_key;
 
-      if (!endpoint) {
-        setAsrTestMessage('No endpoint configured');
+      if (config.service_provider !== 'local' && !endpoint) {
+        setAsrTestMessage('No endpoint configured for Cloud ASR');
         return;
       }
 
@@ -497,14 +508,20 @@ export const ASRSettings: React.FC = () => {
       const base64Data = btoa(String.fromCharCode(...uint8Array));
 
       // Call Rust backend for ASR transcription
+      const request: any = {
+        audio_file_data: base64Data,
+        file_name: selectedFile.name,
+        service_provider: config.service_provider
+      };
+
+      // Only add endpoint and api_key for Cloud ASR
+      if (config.service_provider !== 'local') {
+        request.endpoint = endpoint;
+        request.api_key = apiKey || undefined;
+      }
+
       const response = await invoke('test_asr_transcription', {
-        request: {
-          audio_file_data: base64Data,
-          file_name: selectedFile.name,
-          service_provider: config.service_provider,
-          endpoint: endpoint,
-          api_key: apiKey || undefined
-        }
+        request
       }) as {
         success: boolean;
         transcription?: string;
@@ -602,8 +619,8 @@ export const ASRSettings: React.FC = () => {
         <div className="grid gap-4">
           <ServiceOption
             id={ServiceProvider.Local}
-            title="Local ASR"
-            description="Runs on device. Privacy focused. Requires powerful GPU."
+            title="Local Whisper"
+            description="Local inference with whisper-rs. Privacy focused and offline capable."
             icon={<Server className="w-6 h-6" />}
             selected={selectedService === ServiceProvider.Local}
             onSelect={() => handleServiceChange(ServiceProvider.Local)}
@@ -612,7 +629,7 @@ export const ASRSettings: React.FC = () => {
           <ServiceOption
             id={ServiceProvider.Cloud}
             title="Cloud ASR"
-            description="Ultra-fast cloud inference. Supports multiple providers (Whisper, SenseVoice). Requires API Key."
+            description="Fast cloud inference with multiple providers (SiliconFlow, Groq). Requires API key and internet connection."
             icon={<Cloud className="w-6 h-6" />}
             selected={selectedService === ServiceProvider.Cloud}
             onSelect={() => handleServiceChange(ServiceProvider.Cloud)}
@@ -627,31 +644,23 @@ export const ASRSettings: React.FC = () => {
         <div className="space-y-4">
           {hasLoadedFromDatabase && selectedService === ServiceProvider.Local ? (
             <>
-              <Input
-                label="Local ASR API Endpoint"
-                value={localEndpoint}
-                onChange={handleLocalEndpointChange}
-                placeholder="http://localhost:5001/inference"
-                disabled={isLoading}
-                autoFocus={false}
-                error={isEndpointInsecure(localEndpoint) ? 'Warning: Using HTTP is insecure. Credentials may be transmitted unencrypted.' : undefined}
-              />
-              <Input
-                label="Local ASR API Key"
-                type="password"
-                value={localApiKey}
-                onChange={handleLocalApiKeyChange}
-                placeholder="Enter your local ASR API key..."
-                required
-                disabled={isLoading}
-                autoFocus={false}
-              />
-              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                ⚠️ <strong>Security Notice:</strong> API keys are sensitive credentials. Never share them publicly or commit to version control. Use HTTPS endpoints when possible.
-              </p>
-              <p className="text-sm text-gray-500">
-                Local ASR runs on your device. Configure the endpoint where your local ASR service is running.
-              </p>
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="flex items-start space-x-3">
+                  <Server className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <h4 className="text-sm font-semibold text-blue-900">Local Whisper Configuration</h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      Local Whisper uses whisper-rs for on-device inference. The system automatically detects and uses your downloaded model at:
+                    </p>
+                    <code className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded mt-2 block font-mono">
+                      ~/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin
+                    </code>
+                    <p className="text-sm text-blue-700 mt-2">
+                      No configuration required - just ensure the model file is present.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </>
           ) : hasLoadedFromDatabase && selectedService === ServiceProvider.Cloud ? (
             <>
@@ -689,15 +698,18 @@ export const ASRSettings: React.FC = () => {
           )}
 
           <div className="flex items-center space-x-4 pt-4 border-t border-gray-200">
-            <Button
-              onClick={saveConfiguration}
-              loading={isSaving}
-              disabled={isLoading || isTesting || !hasLoadedFromDatabase}
-              variant="primary"
-              icon={<Save className="w-4 h-4"/>}
-            >
-              Save Configuration
-            </Button>
+            {/* Only show Save button for Cloud ASR */}
+            {hasLoadedFromDatabase && selectedService === ServiceProvider.Cloud && (
+              <Button
+                onClick={saveConfiguration}
+                loading={isSaving}
+                disabled={isLoading || isTesting || !hasLoadedFromDatabase}
+                variant="primary"
+                icon={<Save className="w-4 h-4"/>}
+              >
+                Save Configuration
+              </Button>
+            )}
             <Button
               onClick={handleAsrTest}
               loading={isTestingAsr}
@@ -885,12 +897,22 @@ export const ShortcutSettings: React.FC = () => {
         try {
             setIsSaving(true);
 
+            // First, load existing configuration to preserve user settings
+            const existingConfig = await invoke<HotkeyConfig | null>('get_hotkey_config');
+
             const config: HotkeyConfigRequest = {
                 transcribe_key: transcribeKey,
                 translate_key: translateKey,
                 trigger_delay_ms: Math.round(delay * 1000), // Convert seconds to ms
                 anti_mistouch_enabled: antiTouch,
                 save_wav_files: saveWavFiles,
+                typing_delays: {
+                    clipboard_update_ms: existingConfig?.clipboard_update_ms ?? 100,
+                    keyboard_events_settle_ms: existingConfig?.keyboard_events_settle_ms ?? 300,
+                    typing_complete_ms: existingConfig?.typing_complete_ms ?? 500,
+                    character_interval_ms: existingConfig?.character_interval_ms ?? 100,
+                    short_operation_ms: existingConfig?.short_operation_ms ?? 100,
+                }, // Preserve existing delays from Advanced settings
             };
 
             console.log('💾 Saving hotkey config:');
@@ -931,7 +953,7 @@ export const ShortcutSettings: React.FC = () => {
                 </div>
              </section>
 
-    
+
 
              {/* Save Button */}
              <div className="flex justify-end space-x-3 mt-8">

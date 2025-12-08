@@ -1,10 +1,11 @@
 import React, { memo } from 'react';
-import { Mic, Keyboard, Palette, Sliders, Monitor } from 'lucide-react';
+import { Mic, Keyboard, Palette, Sliders, Monitor, Download } from 'lucide-react';
 import { NavTab } from '../../types';
 import { ASRSettings, ShortcutSettings, PlaceholderSettings } from './SettingsContent';
 import { AppearanceSettings } from './AppearanceSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { SystemInfoSettings } from './SystemInfoSettings';
+import { ModelDownload } from './ModelDownload';
 
 export interface SettingsViewProps {
   activeSettingsTab: string;
@@ -16,6 +17,7 @@ export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setAct
     { id: 'asr', label: 'ASR Service', icon: Mic },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'models', label: 'Whisper Models', icon: Download },
     { id: 'advanced', label: 'Advanced', icon: Sliders },
     { id: 'system', label: 'System', icon: Monitor },
   ];
@@ -52,6 +54,7 @@ export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setAct
         {activeSettingsTab === 'asr' && <ASRSettings />}
         {activeSettingsTab === 'shortcuts' && <ShortcutSettings />}
         {activeSettingsTab === 'appearance' && <AppearanceSettings />}
+        {activeSettingsTab === 'models' && <ModelDownload />}
         {activeSettingsTab === 'advanced' && <AdvancedSettings />}
         {activeSettingsTab === 'system' && <SystemInfoSettings />}
       </main>

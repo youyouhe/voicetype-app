@@ -144,4 +144,8 @@ impl AsrProcessor for WhisperProcessor {
             self.call_whisper_api(mode, &audio_data, prompt).await
         })
     }
+    
+    fn get_processor_type(&self) -> Option<&str> {
+        Some("whisper")
+    }
 }

@@ -106,4 +106,8 @@ impl AsrProcessor for SenseVoiceProcessor {
             }
         })
     }
+    
+    fn get_processor_type(&self) -> Option<&str> {
+        Some("sensevoice")
+    }
 }

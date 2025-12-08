@@ -37,4 +37,5 @@ cpal = "0.16.0"
 base64 = "0.22.1"
 sqlx = { version = "0.8.2", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
+whisper-rs = "0.11"
 

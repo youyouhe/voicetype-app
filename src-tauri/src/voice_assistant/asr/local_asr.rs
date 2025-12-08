@@ -4,6 +4,12 @@ use crate::voice_assistant::{AsrProcessor, Mode, VoiceError};
 use serde_json::Value;
 use std::time::Duration;
 
+#[derive(Debug, Clone)]
+pub struct LocalASRConfig {
+    pub endpoint: String,
+    pub api_key: String,
+}
+
 pub struct LocalASRProcessor {
     client: reqwest::Client,
     api_url: String,
@@ -14,7 +20,7 @@ impl LocalASRProcessor {
     pub fn new() -> Result<Self, VoiceError> {
         let api_url = std::env::var("LOCAL_ASR_URL")
             .unwrap_or_else(|_| "http://192.168.8.107:5001/inference".to_string());
-        
+
         let api_key = std::env::var("LOCAL_ASR_KEY")
             .unwrap_or_else(|_| "default-key".to_string());
 
@@ -30,7 +36,7 @@ impl LocalASRProcessor {
         })
     }
 
-    pub fn with_config(api_url: String, api_key: String) -> Result<Self, VoiceError> {
+    pub fn with_config(config: LocalASRConfig) -> Result<Self, VoiceError> {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(20))
             .build()
@@ -38,8 +44,8 @@ impl LocalASRProcessor {
 
         Ok(Self {
             client,
-            api_url,
-            api_key,
+            api_url: config.endpoint,
+            api_key: config.api_key,
         })
     }
 
@@ -103,7 +109,7 @@ impl LocalASRProcessor {
         srt_text
             .lines()
             .filter(|line| {
-                !line.contains("-->") && 
+                !line.contains("-->") &&
                 !line.trim().parse::<u32>().is_ok() &&
                 !line.trim().is_empty()
             })
@@ -128,8 +134,12 @@ impl AsrProcessor for LocalASRProcessor {
                 Mode::Transcriptions => "auto",
                 Mode::Translations => "en",  // Force English for translations
             };
-            
+
             self.call_api(&audio_data, lang).await
         })
+    }
+
+    fn get_processor_type(&self) -> Option<&str> {
+        Some("local")
     }
 }

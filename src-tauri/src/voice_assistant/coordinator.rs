@@ -6,7 +6,8 @@ use crate::voice_assistant::{
     AsrProcessor, TranslateProcessor, 
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
     WhisperProcessor, SenseVoiceProcessor, LocalASRProcessor,
-    SiliconFlowTranslateProcessor, OllamaTranslateProcessor
+    SiliconFlowTranslateProcessor, OllamaTranslateProcessor,
+    WhisperRSProcessor
 };
 use tracing::{info, error};
 
@@ -171,6 +172,8 @@ pub enum ProcessorType {
     CloudASR,
     #[serde(rename = "local")]
     LocalASR,
+    #[serde(rename = "whisper-rs")]
+    WhisperRS,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -249,7 +252,7 @@ impl VoiceAssistant {
                 }
             },
             ProcessorType::LocalASR => {
-                info!("Creating Local ASR processor");
+                info!("Creating Local ASR processor (HTTP API)");
                 // Load ASR configuration from database for Local ASR
                 let local_asr_config = Self::load_local_asr_config().await.unwrap_or_else(|e| {
                     println!("⚠️ Failed to load local ASR config from database: {}, using default", e);
@@ -259,10 +262,38 @@ impl VoiceAssistant {
                     }
                 });
 
-                Arc::new(LocalASRProcessor::with_config(
-                    local_asr_config.endpoint,
-                    local_asr_config.api_key
-                )?)
+                Arc::new(LocalASRProcessor::with_config(local_asr_config)?)
+            },
+            ProcessorType::WhisperRS => {
+                info!("Creating WhisperRS processor (Local whisper.cpp)");
+                // Load WhisperRS configuration from environment or use default location
+                let model_path = std::env::var("WHISPER_MODEL_PATH")
+                    .ok()
+                    .and_then(|path| {
+                        if std::path::Path::new(&path).exists() {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        // Try to find the model in the default data directory
+                        let home = std::env::var("HOME").ok()?;
+                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
+                        if std::path::Path::new(&model_file).exists() {
+                            Some(model_file)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
+                        "./models/ggml-large-v3-turbo.bin".to_string()
+                    });
+
+                println!("🎯 Using Whisper model: {}", model_path);
+
+                Arc::new(WhisperRSProcessor::with_model_path(&model_path)?)
             },
         };
 
@@ -327,12 +358,40 @@ impl VoiceAssistant {
                 }
             },
             ProcessorType::LocalASR => {
-                println!("🔄 Creating Local ASR processor");
+                println!("🔄 Creating Local ASR processor (HTTP API)");
                 let local_asr_config = Self::load_local_asr_config().await?;
-                Arc::new(crate::voice_assistant::asr::local_asr::LocalASRProcessor::with_config(
-                    local_asr_config.endpoint,
-                    local_asr_config.api_key
-                )?)
+                Arc::new(crate::voice_assistant::asr::local_asr::LocalASRProcessor::with_config(local_asr_config)?)
+            },
+            ProcessorType::WhisperRS => {
+                println!("🔄 Creating WhisperRS processor (Local whisper.cpp)");
+                // Load WhisperRS configuration from environment or use default location
+                let model_path = std::env::var("WHISPER_MODEL_PATH")
+                    .ok()
+                    .and_then(|path| {
+                        if std::path::Path::new(&path).exists() {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        // Try to find the model in the default data directory
+                        let home = std::env::var("HOME").ok()?;
+                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
+                        if std::path::Path::new(&model_file).exists() {
+                            Some(model_file)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
+                        "./models/ggml-large-v3-turbo.bin".to_string()
+                    });
+
+                println!("🎯 Using Whisper model: {}", model_path);
+
+                Arc::new(crate::voice_assistant::asr::whisper_rs::WhisperRSProcessor::with_model_path(&model_path)?)
             },
         };
         self.asr_processor = new_asr_processor;
@@ -607,6 +666,18 @@ impl VoiceAssistant {
         let test_result = match processor_type {
             ProcessorType::CloudASR => "Cloud ASR processor test successful",
             ProcessorType::LocalASR => "Local ASR processor test successful",
+            ProcessorType::WhisperRS => {
+                // Check if model file exists for WhisperRS
+                let model_path = std::env::var("WHISPER_MODEL_PATH").unwrap_or_else(|_| {
+                    "./models/ggml-base.bin".to_string()
+                });
+                
+                if std::path::Path::new(&model_path).exists() {
+                    "WhisperRS processor test successful - model found"
+                } else {
+                    "WhisperRS processor test failed - model file not found"
+                }
+            }
         };
 
         info!("{}", test_result);
@@ -833,6 +904,7 @@ pub async fn test_asr(processor_type: ProcessorType) -> Result<String, String> {
     match processor_type {
         ProcessorType::CloudASR => Ok("✅ Cloud ASR processor test successful".to_string()),
         ProcessorType::LocalASR => Ok("✅ Local ASR processor test successful".to_string()),
+        ProcessorType::WhisperRS => Ok("✅ WhisperRS processor test successful".to_string()),
     }
 }
 
