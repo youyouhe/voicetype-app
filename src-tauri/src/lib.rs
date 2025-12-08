@@ -4,6 +4,8 @@ pub mod database;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+use tauri::Manager;
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     let len = name.chars().count();
@@ -22,7 +24,8 @@ fn add(a: i32, b: i32) -> i32 {
 // Re-export VoiceAssistant commands
 use voice_assistant::{
     start_voice_assistant, stop_voice_assistant, get_voice_assistant_state,
-    get_voice_assistant_config, test_asr, test_translation, get_system_info
+    get_voice_assistant_config, test_asr, test_translation, get_system_info,
+    SystemTrayManager, GlobalHotkeyManager, ensure_dependencies
 };
 
 // Import commands module
@@ -44,6 +47,11 @@ use commands::DatabaseState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Ensure system dependencies are available
+    if let Err(e) = ensure_dependencies() {
+        eprintln!("⚠️  Warning: Could not ensure system dependencies: {}", e);
+    }
+
     // Initialize database state
     let db_state: DatabaseState = Arc::new(Mutex::new(None));
 
@@ -62,6 +70,55 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .setup(|app| {
+            // Set the global app handle for event emission
+            crate::voice_assistant::coordinator::set_app_handle(app.handle().clone());
+            println!("✅ Global app handle set for event emission");
+
+            // Initialize system tray manager
+            let system_tray_manager = Arc::new(Mutex::new(
+                SystemTrayManager::new(app.handle().clone())
+            ));
+            app.manage(system_tray_manager.clone());
+
+            // Create system tray icon with menu items
+            match SystemTrayManager::create_tray_icon() {
+                Ok(tray) => {
+                    if let Err(e) = tray.build(app) {
+                        eprintln!("⚠️  Failed to build system tray: {}", e);
+                    } else {
+                        println!("✅ System tray created successfully");
+                    }
+                }
+                Err(e) => eprintln!("⚠️  Failed to create system tray: {}", e),
+            }
+
+            // Create overlay window (initially hidden) - TEMPORARILY DISABLED
+            // let tray_manager_ref = app.state::<Arc<Mutex<SystemTrayManager>>>();
+            // if let Ok(tray_manager) = tray_manager_ref.try_lock() {
+            //     if let Err(e) = tray_manager.create_overlay_window() {
+            //         eprintln!("⚠️  Failed to create overlay window: {}", e);
+            //     } else {
+            //         println!("✅ Overlay window created successfully");
+            //     }
+            // }
+            println!("ℹ️  Overlay window creation disabled for evaluation");
+
+            // Initialize and register global hotkeys
+            let hotkey_manager = GlobalHotkeyManager::new(
+                app.handle().clone(),
+                system_tray_manager.clone()
+            );
+
+            if let Err(e) = hotkey_manager.register_global_hotkeys() {
+                eprintln!("❌ Failed to register global hotkeys: {}", e);
+            } else {
+                println!("ℹ️  Global hotkey registration skipped (feature disabled)");
+            }
+
+            Ok(())
+        })
         .manage(db_state)
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -98,13 +155,6 @@ pub fn run() {
             get_usage_data,
             handle_asr_result
         ])
-        .setup(|app| {
-            // Setup application if needed
-            // Set the global app handle for event emission
-            crate::voice_assistant::coordinator::set_app_handle(app.handle().clone());
-            println!("✅ Global app handle set for event emission");
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
