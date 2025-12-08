@@ -23,15 +23,13 @@ impl AudioRecorder {
         let device = host.default_input_device()
             .ok_or_else(|| VoiceError::Audio("No default input device found".to_string()))?;
 
-        let config = device.default_input_config()
-            .map_err(|e| VoiceError::Audio(format!("Failed to get default config: {}", e)))?;
-
-        let sample_rate = config.sample_rate();
-        println!("AudioRecorder initialized: device={:?}, sample_rate={:?}", device.name(), sample_rate);
+        // 强制使用44100Hz采样率，匹配目标WAV文件格式
+        let sample_rate = 44100;
+        println!("AudioRecorder initialized: device={:?}, sample_rate={}", device.name(), sample_rate);
 
         Ok(Self {
             recording: false,
-            sample_rate: sample_rate.0,
+            sample_rate,
             min_duration_secs: 1.0,
             record_start_time: None,
             audio_data: Vec::new(),
@@ -54,8 +52,9 @@ impl AudioRecorder {
         let config = device.default_input_config()
             .map_err(|e| VoiceError::Audio(format!("Failed to get input config: {}", e)))?;
 
-        let sample_rate = config.sample_rate();
         let channels = config.channels();
+        // 强制使用44100Hz采样率，匹配目标WAV文件格式
+        let sample_rate = cpal::SampleRate(44100);
 
         let stream_config = StreamConfig {
             channels,

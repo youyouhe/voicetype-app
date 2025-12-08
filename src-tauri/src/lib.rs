@@ -25,7 +25,10 @@ fn add(a: i32, b: i32) -> i32 {
 use voice_assistant::{
     start_voice_assistant, stop_voice_assistant, get_voice_assistant_state,
     get_voice_assistant_config, test_asr, test_translation, get_system_info,
-    SystemTrayManager, GlobalHotkeyManager, ensure_dependencies
+    SystemTrayManager, GlobalHotkeyManager, ensure_dependencies,
+    // Model management commands
+    get_available_models, download_model, delete_model, set_active_model,
+    get_active_model_info, get_model_stats
 };
 
 // Import commands module
@@ -153,7 +156,14 @@ pub fn run() {
             get_service_status,
             get_latency_data,
             get_usage_data,
-            handle_asr_result
+            handle_asr_result,
+            // Model management commands
+            get_available_models,
+            download_model,
+            delete_model,
+            set_active_model,
+            get_active_model_info,
+            get_model_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

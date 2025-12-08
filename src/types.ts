@@ -63,10 +63,19 @@ export interface HotkeyConfig {
   updated_at: string;
 }
 
+export interface TypingDelays {
+  clipboard_update_ms: number;     // 剪贴板更新等待时间
+  keyboard_events_settle_ms: number; // 键盘事件处理等待时间
+  typing_complete_ms: number;      // 打字完成后等待时间
+  character_interval_ms: number;   // 字符间延迟时间
+  short_operation_ms: number;      // 其他短操作延迟时间
+}
+
 export interface HotkeyConfigRequest {
   transcribe_key: string;
   translate_key: string;
   trigger_delay_ms: number;
   anti_mistouch_enabled: boolean;
   save_wav_files: boolean;
+  typing_delays: TypingDelays;
 }

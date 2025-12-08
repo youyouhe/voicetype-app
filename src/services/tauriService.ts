@@ -90,7 +90,30 @@ export class TauriService {
     return await invoke<UsageData>('get_usage_data');
   }
 
-  
+  // Model Management Methods
+  static async getAvailableModels(): Promise<any[]> {
+    return await invoke<any[]>('get_available_models');
+  }
+
+  static async downloadModel(modelName: string): Promise<string> {
+    return await invoke<string>('download_model', { modelName });
+  }
+
+  static async deleteModel(modelName: string): Promise<string> {
+    return await invoke<string>('delete_model', { modelName });
+  }
+
+  static async setActiveModel(modelName: string): Promise<string> {
+    return await invoke<string>('set_active_model', { modelName });
+  }
+
+  static async getActiveModelInfo(): Promise<string | null> {
+    return await invoke<string | null>('get_active_model_info');
+  }
+
+  static async getModelStats(): Promise<any> {
+    return await invoke<any>('get_model_stats');
+  }
 
   // Legacy functions (keep for compatibility)
   static async greet(name: string): Promise<string> {

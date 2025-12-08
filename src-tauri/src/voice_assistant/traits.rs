@@ -25,6 +25,18 @@ pub enum VoiceError {
     Utf8(#[from] std::string::FromUtf8Error),
 }
 
+impl From<String> for VoiceError {
+    fn from(s: String) -> Self {
+        VoiceError::Other(s)
+    }
+}
+
+impl From<&str> for VoiceError {
+    fn from(s: &str) -> Self {
+        VoiceError::Other(s.to_string())
+    }
+}
+
 pub trait AsrProcessor {
     fn process_audio(
         &self,
@@ -32,6 +44,8 @@ pub trait AsrProcessor {
         mode: Mode,
         prompt: &str,
     ) -> Result<String, VoiceError>;
+    
+    fn get_processor_type(&self) -> Option<&str>;
 }
 
 pub trait TranslateProcessor {
