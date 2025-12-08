@@ -6,6 +6,7 @@ use crate::voice_assistant::{KeyboardManagerTrait, AsrProcessor, TranslateProces
 use std::process::Command;
 use crate::voice_assistant::hotkey_parser::ParsedHotkey;
 use std::collections::HashSet;
+use crate::database::TypingDelays;
 
 pub struct KeyboardManager {
     state: Arc<Mutex<InputState>>,
@@ -21,6 +22,8 @@ pub struct KeyboardManager {
     original_clipboard: Arc<Mutex<Option<String>>>,
     // WAV文件保存配置
     save_wav_files: Arc<Mutex<bool>>,
+    // 延迟配置
+    typing_delays: Arc<Mutex<TypingDelays>>,
 }
 
 impl KeyboardManager {
@@ -39,6 +42,7 @@ impl KeyboardManager {
             temp_text_length: Arc::new(Mutex::new(0)),
             original_clipboard: Arc::new(Mutex::new(None)),
             save_wav_files: Arc::new(Mutex::new(false)), // Default to false
+            typing_delays: Arc::new(Mutex::new(TypingDelays::default())),
         })
     }
 
@@ -94,7 +98,10 @@ impl KeyboardManager {
         // 获取save_wav_files配置传递到回调中
         let save_wav_files_config = *self.save_wav_files.lock().unwrap();
         println!("📁 Save WAV Files setting from config: {}", save_wav_files_config);
-        
+
+        // 克隆延迟配置以便在闭包中使用
+        let typing_delays_for_callback = self.typing_delays.clone();
+
         tokio::task::spawn_blocking(move || {
             let mut recorder: Option<crate::voice_assistant::AudioRecorder> = None;
 
@@ -339,7 +346,7 @@ impl KeyboardManager {
                                     println!("✅ Database save operation completed");
                                 }
                                 
-                                Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result_text, None);
+                                Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result_text, None, &typing_delays_for_callback.lock().unwrap());
                                 println!("✅ ASR result typing completed");
                             }
 
@@ -367,7 +374,7 @@ impl KeyboardManager {
                             let mock_translated = "这是热键翻译测试文字，模拟语音翻译结果。This is a mock translation test from voice input. 🌐".to_string();
 
                             println!("⌨️ Typing translated text: \"{}\"", mock_translated);
-                            Self::type_text_internal(&state_clone, &temp_len_clone, &clipboard_clone, &mock_translated, None);
+                            Self::type_text_internal(&state_clone, &temp_len_clone, &clipboard_clone, &mock_translated, None, &typing_delays_for_callback.lock().unwrap());
                             println!("✅ Translation text typing completed");
 
                             // Stop any recording if active
@@ -442,6 +449,7 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
         original_clipboard: &Arc<Mutex<Option<String>>>,
         text: &str,
         error: Option<&str>,
+        delays: &TypingDelays,
     ) {
         // 删除之前的临时文本
         let len = *temp_text_length.lock().unwrap();
@@ -452,7 +460,7 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
 
         if let Some(err_msg) = error {
             // 显示错误消息
-            simulate_typing(&format!("❌ {}", err_msg));
+            simulate_typing(&format!("❌ {}", err_msg), delays);
             *temp_text_length.lock().unwrap() = 2 + err_msg.len();
 
             // 2秒后清除错误消息 - use std sleep instead of tokio
@@ -473,7 +481,7 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
             *state.lock().unwrap() = InputState::Error;
         } else if !text.is_empty() {
             // 输入最终文本
-            simulate_typing(text);
+            simulate_typing(text, delays);
 
             // 恢复剪贴板
             let mut clipboard = original_clipboard.lock().unwrap();
@@ -536,6 +544,18 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
         *setting = save_wav_files;
         println!("🔧 Save WAV Files setting updated to: {}", save_wav_files);
     }
+
+    /// 设置延迟配置
+    pub fn set_typing_delays(&self, typing_delays: TypingDelays) {
+        let mut delays = self.typing_delays.lock().unwrap();
+        *delays = typing_delays;
+        println!("🔧 Typing delays updated:");
+        println!("  - clipboard_update_ms: {}ms", delays.clipboard_update_ms);
+        println!("  - keyboard_events_settle_ms: {}ms", delays.keyboard_events_settle_ms);
+        println!("  - typing_complete_ms: {}ms", delays.typing_complete_ms);
+        println!("  - character_interval_ms: {}ms", delays.character_interval_ms);
+        println!("  - short_operation_ms: {}ms", delays.short_operation_ms);
+    }
 }
 
 impl KeyboardManagerTrait for KeyboardManager {
@@ -552,7 +572,7 @@ impl KeyboardManagerTrait for KeyboardManager {
     }
 }
 
-fn simulate_typing(text: &str) {
+fn simulate_typing(text: &str, delays: &TypingDelays) {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
@@ -595,19 +615,19 @@ fn simulate_typing(text: &str) {
         set_clipboard_content(text);
 
         // 等待剪贴板更新
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_millis(delays.clipboard_update_ms as u64));
 
         // For xterm and other terminals, direct typing is more reliable than clipboard paste
         println!("🔧 Using direct typing for terminal compatibility...");
 
         // Method 1: Try direct typing first (most reliable for terminals)
-        if let Ok(_) = type_text_direct(text) {
+        if let Ok(_) = type_text_direct(text, delays) {
             println!("✅ Direct typing successful");
         } else {
             println!("🔧 Direct typing failed, trying clipboard methods...");
 
             // Method 2: Try Ctrl+Shift+V for terminal paste as fallback
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(delays.short_operation_ms as u64));
             if let Ok(output) = Command::new("xdotool")
                 .args(&["key", "Ctrl+Shift+V"])
                 .output()
@@ -618,7 +638,7 @@ fn simulate_typing(text: &str) {
                     eprintln!("Ctrl+Shift+V failed: {:?}", String::from_utf8_lossy(&output.stderr));
 
                     // Method 3: Try middle-click paste
-                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    std::thread::sleep(std::time::Duration::from_millis(delays.short_operation_ms as u64));
                     if let Ok(output2) = Command::new("xdotool")
                         .args(&["click", "2"])
                         .output()
@@ -636,7 +656,7 @@ fn simulate_typing(text: &str) {
         }
 
         // 等待粘贴完成
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(delays.short_operation_ms as u64));
 
         // 恢复原始剪贴板内容
         if let Some(original) = current_clipboard {
@@ -647,7 +667,7 @@ fn simulate_typing(text: &str) {
     }
 
 // Fallback function: type text directly using xdotool
-fn type_text_direct(text: &str) -> Result<(), VoiceError> {
+fn type_text_direct(text: &str, delays: &TypingDelays) -> Result<(), VoiceError> {
     println!("🔧 Direct typing text: \"{}\"", text);
 
     // For xterm compatibility, set text to BOTH clipboard and primary selection - DISABLED PRIMARY
@@ -840,7 +860,7 @@ fn type_text_direct(text: &str) -> Result<(), VoiceError> {
     */
     
     // Wait for clipboard to update
-    std::thread::sleep(std::time::Duration::from_millis(300));
+    std::thread::sleep(std::time::Duration::from_millis(delays.clipboard_update_ms as u64));
     
     // Use xdotool type command for direct text input
     println!("🔧 Using xdotool type command for direct text input...");
@@ -849,12 +869,12 @@ fn type_text_direct(text: &str) -> Result<(), VoiceError> {
         println!("✅ xdotool found for direct typing");
 
         // Add delay to ensure keyboard events are fully processed
-        println!("⏱️ Waiting 300ms for keyboard events to settle...");
-        std::thread::sleep(std::time::Duration::from_millis(300));
+        println!("⏱️ Waiting {}ms for keyboard events to settle...", delays.keyboard_events_settle_ms);
+        std::thread::sleep(std::time::Duration::from_millis(delays.keyboard_events_settle_ms as u64));
 
         // Use xdotool type to input text directly with slower typing speed for Chinese characters
         match Command::new("xdotool")
-            .args(&["type", "--delay", "100", text])  // 100ms delay between characters for better Chinese input
+            .args(&["type", "--delay", &delays.character_interval_ms.to_string(), text])  // delay between characters for better Chinese input
             .output()
         {
             Ok(output) => {
@@ -871,7 +891,7 @@ fn type_text_direct(text: &str) -> Result<(), VoiceError> {
         }
 
         // Add a small delay to ensure typing completes
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(delays.typing_complete_ms as u64));
 
     } else {
         println!("❌ xdotool not found, cannot use direct typing");

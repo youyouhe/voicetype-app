@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>麦克风悬浮窗</title>
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 200px;
+        height: 200px;
+        background: transparent;
+        overflow: hidden;
+        -webkit-app-region: drag;
+        border: none;
+        outline: none;
+        display: block;
+      }
+
+      /* Remove all default backgrounds */
+      * {
+        background-color: transparent !important;
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      .mic-button {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 80px;
+        height: 80px;
+        border-radius: 50%;
+        background: rgba(59, 130, 246, 0.9);
+        backdrop-filter: blur(10px);
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        -webkit-app-region: no-drag;
+      }
+      
+      .mic-button:hover {
+        background: rgba(37, 99, 235, 0.95);
+        transform: scale(1.1);
+      }
+      
+      .mic-button.recording {
+        background: rgba(239, 68, 68, 0.9);
+        animation: pulse 1.5s infinite;
+      }
+      
+      @keyframes pulse {
+        0% {
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
+        }
+        70% {
+          box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+        }
+        100% {
+          box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+        }
+      }
+      
+      .mic-icon {
+        color: white;
+        font-size: 36px;
+      }
+
+      .close-btn {
+        position: absolute;
+        top: 70px;
+        right: 70px;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: rgba(239, 68, 68, 0.9);
+        border: 2px solid white;
+        color: white;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+        -webkit-app-region: no-drag;
+      }
+      
+      .mic-button:hover .close-btn {
+        opacity: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="mic-button" id="micButton">
+      <svg class="mic-icon" id="micIcon" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd"></path>
+      </svg>
+      <div class="close-btn" id="closeBtn">×</div>
+    </div>
+    
+    <script>
+      const { invoke } = window.__TAURI__.core;
+
+      let isRecording = false;
+      let isVisible = true;
+
+      const micButton = document.getElementById('micButton');
+      const micIcon = document.getElementById('micIcon');
+      const closeBtn = document.getElementById('closeBtn');
+
+      // Get current window using app handle
+      const getCurrentWindow = async () => {
+        try {
+          // Get the current webview window using the proper Tauri v2 API
+          if (window.__TAURI__.webviewWindow && window.__TAURI__.webviewWindow.getCurrentWebviewWindow) {
+            return window.__TAURI__.webviewWindow.getCurrentWebviewWindow();
+          }
+          return null;
+        } catch (error) {
+          console.error('Failed to get current window:', error);
+          return null;
+        }
+      };
+
+      // Microphone click handler
+      micButton.addEventListener('click', async () => {
+        if (!isRecording) {
+          try {
+            await invoke('start_voice_assistant');
+            isRecording = true;
+            micButton.classList.add('recording');
+            updateMicIcon(true);
+          } catch (error) {
+            console.error('Failed to start voice assistant:', error);
+          }
+        } else {
+          try {
+            await invoke('stop_voice_assistant');
+            isRecording = false;
+            micButton.classList.remove('recording');
+            updateMicIcon(false);
+          } catch (error) {
+            console.error('Failed to stop voice assistant:', error);
+          }
+        }
+      });
+
+      // Close button handler
+      closeBtn.addEventListener('click', async () => {
+        try {
+          const currentWindow = await getCurrentWindow();
+          if (currentWindow && currentWindow.hide) {
+            await currentWindow.hide();
+          }
+        } catch (error) {
+          console.warn('Could not hide window (permission denied):', error.message);
+          // Try alternative approach: close overlay through system tray
+          if (window.__TAURI__ && window.__TAURI__.invoke) {
+            window.__TAURI__.invoke('hide_overlay_window');
+          }
+        }
+      });
+      
+      // Update microphone icon based on state
+      function updateMicIcon(recording) {
+        if (recording) {
+          micIcon.innerHTML = `
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"></path>
+          `;
+        } else {
+          micIcon.innerHTML = `
+            <path fill-rule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clip-rule="evenodd"></path>
+          `;
+        }
+      }
+
+      // Add title bar for dragging
+      document.addEventListener('DOMContentLoaded', async () => {
+        try {
+          const currentWindow = await getCurrentWindow();
+          if (currentWindow && currentWindow.setTitle) {
+            await currentWindow.setTitle('Flash-Input 麦克风');
+          }
+        } catch (error) {
+          console.warn('Could not set window title (permission denied):', error.message);
+          // Silently handle permission errors - title setting is not critical for functionality
+        }
+      });
+    </script>
+  </body>
+</html>

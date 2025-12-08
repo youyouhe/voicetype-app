@@ -26,7 +26,7 @@ fn emit_voice_assistant_state_change(state: &InputState) {
         if let Ok(app_handle) = handle_guard.lock() {
             if let Some(ref handle) = *app_handle {
                 let state_str = match state {
-                    InputState::Idle => "Idle".to_string(),
+                    InputState::Idle => "Running".to_string(), // 🔥 FIXED: Keep service as "Running" instead of "Idle"
                     InputState::Recording => "Recording".to_string(),
                     InputState::RecordingTranslate => "RecordingTranslate".to_string(),
                     InputState::Processing => "Processing".to_string(),
@@ -669,6 +669,12 @@ impl VoiceAssistant {
         let keyboard_manager = self.keyboard_manager.lock().unwrap();
         keyboard_manager.set_anti_mistouch_enabled(enabled);
     }
+
+    /// 设置延迟配置
+    pub fn set_typing_delays(&self, typing_delays: crate::database::TypingDelays) {
+        let keyboard_manager = self.keyboard_manager.lock().unwrap();
+        keyboard_manager.set_typing_delays(typing_delays);
+    }
 }
 
 impl Default for VoiceAssistant {
@@ -774,8 +780,18 @@ pub async fn stop_voice_assistant() -> Result<String, String> {
             match assistant.stop() {
                 Ok(()) => {
                     info!("✅ VoiceAssistant stopped successfully");
-                    // Emit stopped state
-                    emit_voice_assistant_state_change(&InputState::Idle);
+                    // Emit stopped state - use "Idle" to indicate service is actually stopped
+                    if let Some(handle_guard) = APP_HANDLE.get() {
+                        if let Ok(app_handle) = handle_guard.lock() {
+                            if let Some(ref handle) = *app_handle {
+                                if let Err(e) = handle.emit("voice-assistant-state-changed", "Idle") {
+                                    error!("Failed to emit voice assistant state change event: {}", e);
+                                } else {
+                                    info!("✅ Emitted voice assistant state change: Idle (service stopped)");
+                                }
+                            }
+                        }
+                    }
                     Ok("VoiceAssistant stopped successfully".to_string())
                 }
                 Err(e) => {
@@ -846,12 +862,16 @@ pub async fn configure_hotkeys(
     translate_key: String,
     trigger_delay_ms: i64,
     anti_mistouch_enabled: bool,
+    typing_delays: Option<crate::database::TypingDelays>,
 ) -> Result<String, String> {
     info!("Configuring hotkeys:");
     info!("  - Transcribe: {}", transcribe_key);
     info!("  - Translate: {}", translate_key);
     info!("  - Trigger delay: {}ms", trigger_delay_ms);
     info!("  - Anti-mistouch: {}", anti_mistouch_enabled);
+    if typing_delays.is_some() {
+        info!("  - Typing delays configured");
+    }
 
     // Create a temporary VoiceAssistant to configure hotkeys
     match VoiceAssistant::new().await {
@@ -867,6 +887,11 @@ pub async fn configure_hotkeys(
 
             assistant.set_trigger_delay_ms(trigger_delay_ms);
             assistant.set_anti_mistouch_enabled(anti_mistouch_enabled);
+
+            // Set typing delays if provided
+            if let Some(delays) = typing_delays {
+                assistant.set_typing_delays(delays);
+            }
 
             info!("✅ Hotkeys configured successfully");
             Ok("Hotkeys configured successfully".to_string())
