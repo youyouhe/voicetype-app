@@ -3,11 +3,11 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 use tauri::{AppHandle, Emitter};
 use crate::voice_assistant::{
-    AsrProcessor, TranslateProcessor, 
+    AsrProcessor, TranslateProcessor,
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
     WhisperProcessor, SenseVoiceProcessor, LocalASRProcessor,
     SiliconFlowTranslateProcessor, OllamaTranslateProcessor,
-    WhisperRSProcessor
+    WhisperRSProcessor, EnhancedWhisperProcessor
 };
 use tracing::{info, error};
 
@@ -174,6 +174,8 @@ pub enum ProcessorType {
     LocalASR,
     #[serde(rename = "whisper-rs")]
     WhisperRS,
+    #[serde(rename = "enhanced-whisper")]
+    EnhancedWhisper,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -294,6 +296,42 @@ impl VoiceAssistant {
                 println!("🎯 Using Whisper model: {}", model_path);
 
                 Arc::new(WhisperRSProcessor::with_model_path(&model_path)?)
+            },
+            ProcessorType::EnhancedWhisper => {
+                info!("Creating Enhanced Whisper processor (with VAD support)");
+                // Load model path with intelligent detection
+                let model_path = std::env::var("WHISPER_MODEL_PATH")
+                    .ok()
+                    .and_then(|path| {
+                        if std::path::Path::new(&path).exists() {
+                            Some(path)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        // Try to find the model in the default data directory
+                        let home = std::env::var("HOME").ok()?;
+                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
+                        if std::path::Path::new(&model_file).exists() {
+                            Some(model_file)
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(|| {
+                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
+                        "./models/ggml-large-v3-turbo.bin".to_string()
+                    });
+
+                println!("🚀 Using Enhanced Whisper with VAD model: {}", model_path);
+
+                // Use beam search with VAD for better accuracy
+                Arc::new(EnhancedWhisperProcessor::with_beam_search_and_vad(
+                    &model_path,
+                    5,  // beam_size
+                    -1.0, // patience (default)
+                )?)
             },
         };
 

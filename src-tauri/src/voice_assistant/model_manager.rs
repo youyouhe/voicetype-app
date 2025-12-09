@@ -65,7 +65,7 @@ impl ModelManager {
     }
 
     fn initialize_models(&mut self) {
-        // Define available models - only keep large-v3-turbo
+        // Define available models
         self.models = vec![
             WhisperModel::new(
                 "large-v3-turbo",
@@ -73,6 +73,13 @@ impl ModelManager {
                 "ggml-large-v3-turbo.bin",
                 1570.0,
                 "最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用"
+            ),
+            WhisperModel::new(
+                "vad",
+                "Voice Activity Detection",
+                "ggml-vad.bin",
+                40.0,
+                "语音活动检测模型，用于识别音频中的语音片段，提升语音识别准确性"
             ),
         ];
 
