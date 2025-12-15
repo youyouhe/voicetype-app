@@ -1,0 +1,10 @@
+prefix=/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-ba23bb6367c4c149/out
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: whisper
+Description: Port of OpenAI's Whisper model in C/C++
+Version: 1.7.6
+Libs: -L${libdir} -lggml  -lggml-base -lwhisper
+Cflags: -I${includedir}

@@ -68,6 +68,13 @@ impl ModelManager {
         // Define available models
         self.models = vec![
             WhisperModel::new(
+                "large-v3",
+                "Large v3",
+                "ggml-large-v3.bin",
+                2950.0,
+                "大型模型，最高精度，适合对准确性要求极高的场景"
+            ),
+            WhisperModel::new(
                 "large-v3-turbo",
                 "Large v3 Turbo",
                 "ggml-large-v3-turbo.bin",
@@ -75,10 +82,17 @@ impl ModelManager {
                 "最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用"
             ),
             WhisperModel::new(
+                "small",
+                "Small",
+                "ggml-small.bin",
+                467.0,
+                "小型模型，平衡了速度和准确性，适合日常使用"
+            ),
+            WhisperModel::new(
                 "vad",
                 "Voice Activity Detection",
                 "ggml-vad.bin",
-                40.0,
+                1.0,
                 "语音活动检测模型，用于识别音频中的语音片段，提升语音识别准确性"
             ),
         ];
@@ -384,7 +398,17 @@ pub async fn get_available_models(app_handle: AppHandle) -> Result<Vec<WhisperMo
             e.to_string()
         })?;
 
-    let models = manager.get_models();
+    let mut models = manager.get_models();
+    
+    // Filter out VAD model from the list to prevent users from selecting it
+    let original_count = models.len();
+    models.retain(|model| !model.name.contains("vad"));
+    
+    if models.len() < original_count {
+        println!("⚠️ Filtered out VAD model(s) from available models list");
+        println!("📋 Original models count: {}, Filtered models count: {}", original_count, models.len());
+    }
+    
     println!("📋 Available models count: {}", models.len());
     for model in &models {
         println!("  - {}: {} ({} MB) - Downloaded: {}",

@@ -1,0 +1,114 @@
+running: cd "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build" && CMAKE_PREFIX_PATH="" LC_ALL="C" "cmake" "-Wdev" "--debug-output" "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/" "-B" "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build" "-DBUILD_SHARED_LIBS=OFF" "-DWHISPER_ALL_WARNINGS=OFF" "-DWHISPER_ALL_WARNINGS_3RD_PARTY=OFF" "-DWHISPER_BUILD_TESTS=OFF" "-DWHISPER_BUILD_EXAMPLES=OFF" "-DWHISPER_METAL=OFF" "-DCMAKE_BUILD_TYPE=RelWithDebInfo" "-DCMAKE_INSTALL_PREFIX=/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out" "-DCMAKE_C_FLAGS= -ffunction-sections -fdata-sections -fPIC -m64" "-DCMAKE_C_COMPILER=/usr/bin/cc" "-DCMAKE_CXX_FLAGS= -DWHISPER_DEBUG -ffunction-sections -fdata-sections -fPIC -m64" "-DCMAKE_CXX_COMPILER=/usr/bin/c++" "-DCMAKE_ASM_FLAGS= -ffunction-sections -fdata-sections -fPIC -m64" "-DCMAKE_ASM_COMPILER=/usr/bin/cc" "-DCMAKE_VERBOSE_MAKEFILE:BOOL=ON"
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/CMakeDetermineCompiler.cmake:143 (set):
+  Policy CMP0126 is not set: set(CACHE) does not remove a normal variable of
+  the same name.  Run "cmake --help-policy CMP0126" for policy details.  Use
+  the cmake_policy command to set the policy and suppress this warning.
+
+  For compatibility with older versions of CMake, normal variable
+  "CMAKE_C_COMPILER" will be removed from the current scope.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/CMakeDetermineCCompiler.cmake:68 (_cmake_find_compiler_path)
+  CMakeLists.txt:6 (project)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompiler.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeDetermineCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/CMakeDetermineCompiler.cmake:143 (set):
+  Policy CMP0126 is not set: set(CACHE) does not remove a normal variable of
+  the same name.  Run "cmake --help-policy CMP0126" for policy details.  Use
+  the cmake_policy command to set the policy and suppress this warning.
+
+  For compatibility with older versions of CMake, normal variable
+  "CMAKE_CXX_COMPILER" will be removed from the current scope.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/CMakeDetermineCXXCompiler.cmake:66 (_cmake_find_compiler_path)
+  CMakeLists.txt:6 (project)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompiler.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeDetermineCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake:49 (try_compile):
+  Policy CMP0066 is not set: Honor per-config flags in try_compile()
+  source-file signature.  Run "cmake --help-policy CMP0066" for policy
+  details.  Use the cmake_policy command to set the policy and suppress this
+  warning.
+
+  For compatibility with older versions of CMake, try_compile is not honoring
+  caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+  test project.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)
+  CMakeLists.txt:6 (project)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake:49 (try_compile):
+  Policy CMP0066 is not set: Honor per-config flags in try_compile()
+  source-file signature.  Run "cmake --help-policy CMP0066" for policy
+  details.  Use the cmake_policy command to set the policy and suppress this
+  warning.
+
+  For compatibility with older versions of CMake, try_compile is not honoring
+  caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+  test project.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)
+  CMakeLists.txt:6 (project)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/CheckIncludeFile.cmake:95 (try_compile):
+  Policy CMP0066 is not set: Honor per-config flags in try_compile()
+  source-file signature.  Run "cmake --help-policy CMP0066" for policy
+  details.  Use the cmake_policy command to set the policy and suppress this
+  warning.
+
+  For compatibility with older versions of CMake, try_compile is not honoring
+  caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+  test project.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/FindThreads.cmake:146 (CHECK_INCLUDE_FILE)
+  CMakeLists.txt:123 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CheckIncludeFile.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning (dev) at /usr/share/cmake-3.22/Modules/Internal/CheckSourceCompiles.cmake:92 (try_compile):
+  Policy CMP0066 is not set: Honor per-config flags in try_compile()
+  source-file signature.  Run "cmake --help-policy CMP0066" for policy
+  details.  Use the cmake_policy command to set the policy and suppress this
+  warning.
+
+  For compatibility with older versions of CMake, try_compile is not honoring
+  caller config-specific compiler flags (e.g.  CMAKE_C_FLAGS_DEBUG) in the
+  test project.
+Call Stack (most recent call first):
+  /usr/share/cmake-3.22/Modules/CheckCSourceCompiles.cmake:76 (cmake_check_source_compiles)
+  /usr/share/cmake-3.22/Modules/FindThreads.cmake:163 (CHECK_C_SOURCE_COMPILES)
+  CMakeLists.txt:123 (find_package)
+This warning is for project developers.  Use -Wno-dev to suppress it.
+
+   Called from: [4]	/usr/share/cmake-3.22/Modules/Internal/CheckSourceCompiles.cmake
+                [3]	/usr/share/cmake-3.22/Modules/CheckCSourceCompiles.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+   Entering             /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/bindings
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+   Returning to         /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+CMake Warning:
+  Manually-specified variables were not used by the project:
+
+    CMAKE_ASM_COMPILER
+    CMAKE_ASM_FLAGS
+    WHISPER_METAL
+
+
+running: cd "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build" && LC_ALL="C" MAKEFLAGS="-j --jobserver-fds=11,13 --jobserver-auth=11,13" "cmake" "--build" "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build" "--target" "install" "--config" "Release"

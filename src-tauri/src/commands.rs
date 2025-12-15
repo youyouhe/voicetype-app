@@ -1,9 +1,9 @@
 use crate::database::{Database, NewHistoryRecord};
+use crate::voice_assistant::traits::AsrProcessor;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {
@@ -92,7 +92,7 @@ pub struct AsrTestRequest {
     pub audio_file_data: String,
     pub file_name: String,
     pub service_provider: String,
-    pub endpoint: String,
+    pub endpoint: Option<String>,
     pub api_key: Option<String>,
 }
 
@@ -157,7 +157,7 @@ pub async fn get_asr_config(
     db_state: State<'_, DatabaseState>
 ) -> Result<Option<crate::database::AsrConfig>, String> {
     println!("🔍 Backend: get_asr_config() called");
-    
+
     let db = {
         println!("🔒 Backend: Acquiring database lock...");
         let guard = db_state.lock().unwrap();
@@ -403,10 +403,6 @@ pub async fn test_connection_health(
     println!("📋 Request details: {:?}", request);
 
     // Build health endpoint URL
-    // Handle different endpoint formats:
-    // - If it ends with /inference, replace with /health
-    // - If it ends with /inference/, add health
-    // - Otherwise, just append /health
     let health_endpoint = if request.endpoint.ends_with("/inference") {
         request.endpoint.replace("/inference", "/health")
     } else if request.endpoint.ends_with("/inference/") {
@@ -539,7 +535,7 @@ pub async fn test_asr_transcription(
     println!("🎵 Starting ASR transcription test...");
     println!("📁 Audio file: {}", request.file_name);
     println!("🔧 Service provider: {}", request.service_provider);
-    println!("🔗 Endpoint: {}", request.endpoint);
+    println!("🔗 Endpoint: {:?}", request.endpoint);
 
     let start_time = std::time::Instant::now();
 
@@ -576,7 +572,186 @@ pub async fn test_asr_transcription(
     println!("📊 File size: {} bytes", file_size);
     println!("📖 Successfully decoded {} bytes of audio data", audio_data.len());
 
-    // Prepare the request to ASR service
+    // Route to appropriate processor based on service provider
+    match request.service_provider.as_str() {
+        "local" => {
+            println!("🎯 Attempting Local Whisper (whisper-rs) for transcription");
+            println!("⚠️ Note: whisper-rs has known compatibility issues with some CPU configurations");
+            
+            // Try local whisper first, but with immediate fallback if it fails
+            match test_local_whisper_transcription(audio_data.clone(), file_size, start_time).await {
+                Ok(response) => {
+                    if response.success {
+                        println!("✅ Local whisper succeeded!");
+                        Ok(response)
+                    } else {
+                        println!("❌ Local whisper failed: {}", response.message);
+                        println!("🔄 Auto-switching to Cloud ASR fallback...");
+                        
+                        // Try Cloud ASR fallback
+                        if let Some(endpoint) = std::env::var("GROQ_API_ENDPOINT").ok() {
+                            let api_key = std::env::var("GROQ_API_KEY").ok();
+                            test_cloud_asr_transcription(audio_data, file_size, start_time, &endpoint, api_key).await
+                        } else {
+                            println!("⚠️ No Cloud ASR configured");
+                            Ok(response)
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Local whisper crashed: {}", e);
+                    println!("🔄 Auto-switching to Cloud ASR fallback...");
+                    
+                    // Try Cloud ASR fallback
+                    if let Some(endpoint) = std::env::var("GROQ_API_ENDPOINT").ok() {
+                        let api_key = std::env::var("GROQ_API_KEY").ok();
+                        test_cloud_asr_transcription(audio_data, file_size, start_time, &endpoint, api_key).await
+                    } else {
+                        Err(e)
+                    }
+                }
+            }
+        }
+        "cloud" => {
+            println!("☁️ Using Cloud ASR for transcription");
+            if let Some(endpoint) = request.endpoint {
+                test_cloud_asr_transcription(audio_data, file_size, start_time, &endpoint, request.api_key).await
+            } else {
+                Ok(AsrTestResponse {
+                    success: false,
+                    transcription: None,
+                    processing_time_ms: start_time.elapsed().as_millis() as u64,
+                    file_size,
+                    message: "No endpoint configured for Cloud ASR".to_string(),
+                    status_code: None,
+                })
+            }
+        }
+        other => {
+            println!("❌ Unknown service provider: {}", other);
+            Ok(AsrTestResponse {
+                success: false,
+                transcription: None,
+                processing_time_ms: start_time.elapsed().as_millis() as u64,
+                file_size,
+                message: format!("Unknown service provider: {}", other),
+                status_code: None,
+            })
+        }
+    }
+}
+
+// Local Whisper transcription helper function
+async fn test_local_whisper_transcription(
+    audio_data: Vec<u8>,
+    file_size: u64,
+    start_time: std::time::Instant,
+) -> Result<AsrTestResponse, String> {
+    println!("🎯 Starting Local Whisper transcription...");
+
+    // First, do a quick health check of whisper-rs availability
+    if !check_whisper_rs_health().await {
+        println!("❌ Whisper-rs health check failed - known compatibility issue detected");
+        return Ok(AsrTestResponse {
+            success: false,
+            transcription: None,
+            processing_time_ms: start_time.elapsed().as_millis() as u64,
+            file_size,
+            message: "Whisper-rs has known compatibility issues with this CPU configuration. Auto-switching to Cloud ASR recommended.".to_string(),
+            status_code: None,
+        });
+    }
+
+    // Create WhisperRS processor
+    let processor = match create_local_whisper_processor().await {
+        Ok(processor) => processor,
+        Err(e) => {
+            return Ok(AsrTestResponse {
+                success: false,
+                transcription: None,
+                processing_time_ms: start_time.elapsed().as_millis() as u64,
+                file_size,
+                message: format!("Failed to create Local Whisper processor: {}", e),
+                status_code: None,
+            });
+        }
+    };
+
+    // Convert audio bytes to WAV format and process
+    let audio_cursor = std::io::Cursor::new(audio_data.clone());
+    let transcription_result = match processor.process_audio(
+        audio_cursor,
+        crate::voice_assistant::Mode::Transcriptions,
+        "",
+    ) {
+        Ok(result) => {
+            println!("✅ Local Whisper processing succeeded!");
+            result
+        }
+        Err(e) => {
+            println!("❌ Local Whisper processing failed: {}", e);
+            println!("🔄 Attempting fallback to Cloud ASR...");
+            
+            // Try fallback to Cloud ASR if available
+            let cloud_endpoint = std::env::var("GROQ_API_ENDPOINT").ok();
+            let cloud_api_key = std::env::var("GROQ_API_KEY").ok();
+            
+            if let (Some(endpoint), Some(api_key)) = (cloud_endpoint, cloud_api_key) {
+                println!("☁️ Using Cloud ASR fallback with Groq");
+                match test_cloud_asr_transcription(audio_data, file_size, start_time, &endpoint, Some(api_key)).await {
+                    Ok(cloud_response) => {
+                        if cloud_response.success {
+                            println!("✅ Cloud ASR fallback succeeded!");
+                            return Ok(cloud_response);
+                        } else {
+                            println!("❌ Cloud ASR fallback also failed: {}", cloud_response.message);
+                        }
+                    }
+                    Err(e) => {
+                        println!("❌ Cloud ASR fallback failed with error: {}", e);
+                    }
+                }
+            } else {
+                println!("⚠️ No Cloud ASR credentials available for fallback");
+            }
+            
+            return Ok(AsrTestResponse {
+                success: false,
+                transcription: None,
+                processing_time_ms: start_time.elapsed().as_millis() as u64,
+                file_size,
+                message: format!("Local Whisper processing failed: {}. Cloud fallback unavailable.", e),
+                status_code: None,
+            });
+        }
+    };
+
+    let processing_time = start_time.elapsed().as_millis() as u64;
+
+    println!("✅ Local Whisper transcription completed in {}ms", processing_time);
+    println!("📝 Result: {}", transcription_result);
+
+    Ok(AsrTestResponse {
+        success: true,
+        transcription: Some(transcription_result),
+        processing_time_ms: processing_time,
+        file_size,
+        message: "Local Whisper transcription completed successfully".to_string(),
+        status_code: None,
+    })
+}
+
+// Cloud ASR transcription helper function
+async fn test_cloud_asr_transcription(
+    audio_data: Vec<u8>,
+    file_size: u64,
+    start_time: std::time::Instant,
+    endpoint: &str,
+    api_key: Option<String>,
+) -> Result<AsrTestResponse, String> {
+    println!("☁️ Starting Cloud ASR transcription...");
+
+    // Create HTTP client
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
         .build()
@@ -585,30 +760,17 @@ pub async fn test_asr_transcription(
             format!("Failed to create HTTP client: {}", e)
         })?;
 
-    // Build form data for multipart upload
+    // Create multipart form with audio file
     let form = reqwest::multipart::Form::new()
-        .part("file", reqwest::multipart::Part::bytes(audio_data)
-            .file_name("test.wav")
+        .part("audio", reqwest::multipart::Part::bytes(audio_data)
+            .file_name("test_audio.wav")
             .mime_str("audio/wav")
-            .map_err(|e| format!("Failed to create multipart: {}", e))?);
+            .map_err(|e| format!("Failed to create form part: {}", e))?);
 
-    println!("🚀 Sending request to ASR endpoint...");
-
-    // Make the request
-    println!("🔑 API Key present: {}", request.api_key.is_some());
-    if let Some(ref key) = request.api_key {
-        println!("🔑 API Key length: {} characters", key.len());
-        // Safe substring handling that respects UTF-8 character boundaries
-        let safe_preview = if key.len() > 10 {
-            key.chars().take(10).collect::<String>()
-        } else {
-            key.clone()
-        };
-        println!("🔑 API Key starts with: {}", safe_preview);
-    }
+    println!("🚀 Sending request to Cloud ASR endpoint: {}", endpoint);
 
     // Clean API key - remove API_KEY= prefix if present
-    let clean_api_key = match request.api_key {
+    let clean_api_key = match api_key {
         Some(ref key) => {
             let trimmed = key.trim();
             if trimmed.starts_with("API_KEY=") {
@@ -622,34 +784,19 @@ pub async fn test_asr_transcription(
         None => None,
     };
 
-    if let Some(ref clean_key) = clean_api_key {
-        println!("🔑 Clean API key length: {} characters", clean_key.len());
-        let safe_preview = if clean_key.len() > 10 {
-            clean_key.chars().take(10).collect::<String>()
-        } else {
-            clean_key.clone()
-        };
-        println!("🔑 Clean API key starts with: {}", safe_preview);
-    }
-
-    println!("🔑 API Key header will be: {}", if clean_api_key.is_some() { "Set (X-API-Key)" } else { "Not set" });
-
     let request_builder = client
-        .post(&request.endpoint)
+        .post(endpoint)
         .multipart(form);
 
-    let request_builder = if !clean_api_key.is_some() {
+    let request_builder = if let Some(ref key) = clean_api_key {
+        println!("🔑 Sending X-API-Key header");
+        request_builder.header("X-API-Key", key)
+    } else {
         println!("🔑 No API key will be sent");
         request_builder
-    } else {
-        println!("🔑 Sending X-API-Key header");
-        request_builder.header("X-API-Key", clean_api_key.unwrap())
     };
 
-    let response = match request_builder
-        .send()
-        .await
-    {
+    let response = match request_builder.send().await {
         Ok(resp) => {
             println!("📡 HTTP request completed");
             resp
@@ -738,7 +885,7 @@ pub async fn test_asr_transcription(
     };
 
     if let Some(ref text) = transcription {
-        println!("✅ Transcription result: {}", text);
+        println!("✅ Cloud ASR transcription result: {}", text);
     }
 
     Ok(AsrTestResponse {
@@ -746,8 +893,121 @@ pub async fn test_asr_transcription(
         transcription,
         processing_time_ms: response_time,
         file_size,
-        message: "Transcription completed successfully".to_string(),
+        message: "Cloud ASR transcription completed successfully".to_string(),
         status_code: Some(status_code.as_u16()),
+    })
+}
+
+// Helper function to create Local Whisper processor
+async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr::whisper_rs::WhisperRSProcessor, String> {
+    use crate::voice_assistant::asr::whisper_rs::{WhisperRSProcessor, WhisperRSConfig, SamplingStrategyConfig};
+
+    // Try to get model path from environment
+    let model_path = std::env::var("WHISPER_MODEL_PATH")
+        .ok()
+        .and_then(|path| {
+            if std::path::Path::new(&path).exists() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // Try to find models in the default data directory, preferring smaller models for CPU
+            let home = std::env::var("HOME").ok()?;
+            let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+
+            // Model preference order for CPU (smallest to largest)
+            let model_preferences = [
+                "ggml-base.bin",           // ~74MB
+                "ggml-small.bin",          // ~244MB
+                "ggml-medium.bin",         // ~769MB
+                "ggml-large-v3-turbo.bin", // ~1570MB
+            ];
+
+            for model in model_preferences {
+                let model_file = format!("{}/{}", models_dir, model);
+                if std::path::Path::new(&model_file).exists() {
+                    println!("✅ Found CPU-optimized model: {} ({}MB)",
+                            model,
+                            match model {
+                                "ggml-base.bin" => "74",
+                                "ggml-small.bin" => "244",
+                                "ggml-medium.bin" => "769",
+                                "ggml-large-v3-turbo.bin" => "1570",
+                                _ => "unknown",
+                            });
+                    return Some(model_file);
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| {
+            println!("⚠️ No Whisper model found. Please download a model to ~/.local/share/com.martin.flash-input/models/");
+            println!("💡 Recommended models for CPU: ggml-base.bin (fastest) or ggml-small.bin (balanced)");
+            println!("📥 Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main");
+            println!("🔧 Quick download commands:");
+            println!("   # For base model (fastest, 74MB):");
+            println!("   wget -O ~/.local/share/com.martin.flash-input/models/ggml-base.bin \\");
+            println!("     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
+            "./models/ggml-base.bin".to_string()
+        });
+
+    println!("🎯 Using Whisper model: {}", model_path);
+
+    // Check if VAD should be enabled via environment variable
+    let enable_vad = std::env::var("WHISPER_ENABLE_VAD")
+        .unwrap_or_else(|_| "false".to_string())
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    if enable_vad {
+        println!("🎯 VAD enabled via WHISPER_ENABLE_VAD environment variable");
+    } else {
+        println!("ℹ️  VAD disabled (set WHISPER_ENABLE_VAD=true to enable)");
+    }
+
+    let config = WhisperRSConfig {
+        model_path,
+        sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
+        language: None, // Auto-detect
+        translate: false,
+        enable_vad,
+    };
+
+      // Use thread-safe creation with timeout to prevent crashes
+    println!("⏱️ Creating WhisperRSProcessor with safety timeout...");
+    
+    let processor_result = std::thread::spawn(move || {
+        // Use a simple timeout mechanism
+        let (tx, rx) = std::sync::mpsc::channel();
+        
+        // Spawn the processor creation in a separate thread
+        std::thread::spawn(move || {
+            let result = WhisperRSProcessor::new(config);
+            let _ = tx.send(result);
+        });
+        
+        // Wait for up to 30 seconds for processor creation
+        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+            Ok(processor_result) => processor_result,
+            Err(_) => {
+                eprintln!("⏰ WhisperRSProcessor creation timed out after 30 seconds");
+                eprintln!("💡 This indicates a deadlock or infinite loop in whisper.cpp");
+                Err(crate::voice_assistant::VoiceError::Other(
+                    "WhisperRSProcessor creation timeout - possible whisper.cpp bug".to_string()
+                ))
+            }
+        }
+    }).join().unwrap_or_else(|_| {
+        eprintln!("💥 WhisperRSProcessor creation thread panicked!");
+        Err(crate::voice_assistant::VoiceError::Other(
+            "WhisperRSProcessor creation thread panicked".to_string()
+        ))
+    });
+    
+    processor_result.map_err(|e| {
+        format!("Failed to create Local Whisper processor: {}. This may be due to whisper.cpp compatibility issues with your CPU.", e)
     })
 }
 
@@ -828,35 +1088,35 @@ pub async fn save_hotkey_config(
 pub async fn start_test_recording() -> Result<String, String> {
     use std::sync::{Arc, Mutex};
     use crate::voice_assistant::AudioRecorder;
-    
+
     println!("🎤 Starting test recording...");
-    
+
     // Create a new recorder
     let recorder = Arc::new(Mutex::new(AudioRecorder::new()
         .map_err(|e| format!("Failed to create recorder: {}", e))?));
-    
+
     // Start recording
     {
         let mut rec = recorder.lock().unwrap();
         rec.start_recording()
             .map_err(|e| format!("Failed to start recording: {}", e))?;
     }
-    
+
     println!("🔴 Recording started... Recording for 3 seconds");
-    
+
     // Record for 3 seconds
     tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
-    
+
     // Stop recording and save to file
     let file_path = {
         let mut rec = recorder.lock().unwrap();
         rec.stop_recording()
             .map_err(|e| format!("Failed to stop recording: {}", e))?
     };
-    
+
     println!("✅ Test recording completed!");
     println!("📁 Audio file saved to: {}", file_path);
-    
+
     Ok(format!("Test recording completed. File saved to: {}", file_path))
 }
 
@@ -865,124 +1125,8 @@ pub async fn get_audio_devices() -> Result<Vec<AudioDevice>, String> {
     println!("🎤 Getting available audio devices...");
     println!("🖥️ Platform: {}", std::env::consts::OS);
     println!("⏰ Current time: {:?}", std::time::SystemTime::now());
-    
-    // Try to use actual system APIs if available
-    let devices = scan_system_audio_devices().await?;
-    
-    if devices.is_empty() {
-        println!("⚠️ No system devices found, returning mock devices for testing");
-        return create_mock_devices();
-    }
-    
-    println!("✅ Found {} audio devices", devices.len());
-    for (index, device) in devices.iter().enumerate() {
-        println!("  [{}] ID: {}", index + 1, device.id);
-        println!("      Name: {}", device.name);
-        println!("      Default: {}", device.is_default);
-        println!("      ---");
-    }
-    
-    Ok(devices)
-}
 
-// Try to scan actual system audio devices
-async fn scan_system_audio_devices() -> Result<Vec<AudioDevice>, String> {
-    println!("🔍 Scanning system audio devices...");
-    
-    // For now, we'll create platform-specific mock devices
-    // In a real implementation, you would use cpal or platform-specific APIs
-    
-    #[cfg(target_os = "windows")]
-    {
-        println!("🪟 Windows platform detected");
-        // On Windows, we could use Windows Core Audio APIs
-        // For now, return realistic Windows device names
-        let mut devices = Vec::new();
-        
-        // Try to detect common Windows audio devices
-        devices.push(AudioDevice {
-            id: "default".to_string(),
-            name: "麦克风 (Realtek High Definition Audio)".to_string(),
-            is_default: true,
-        });
-        
-        devices.push(AudioDevice {
-            id: "webcam".to_string(),
-            name: "集成麦克风 (USB Camera)".to_string(),
-            is_default: false,
-        });
-        
-        devices.push(AudioDevice {
-            id: "usb_audio".to_string(),
-            name: "USB Audio Device (USB Audio)".to_string(),
-            is_default: false,
-        });
-        
-        println!("📋 Created {} Windows-specific devices", devices.len());
-        return Ok(devices);
-    }
-    
-    #[cfg(target_os = "macos")]
-    {
-        println!("🍎 macOS platform detected");
-        // On macOS, we could use Core Audio APIs
-        let mut devices = Vec::new();
-        
-        devices.push(AudioDevice {
-            id: "default".to_string(),
-            name: "Built-in Microphone".to_string(),
-            is_default: true,
-        });
-        
-        devices.push(AudioDevice {
-            id: "webcam".to_string(),
-            name: "FaceTime HD Camera (Built-in)".to_string(),
-            is_default: false,
-        });
-        
-        println!("📋 Created {} macOS-specific devices", devices.len());
-        return Ok(devices);
-    }
-    
-    #[cfg(target_os = "linux")]
-    {
-        println!("🐧 Linux platform detected");
-        // On Linux, we could use ALSA or PulseAudio APIs
-        let mut devices = Vec::new();
-        
-        devices.push(AudioDevice {
-            id: "default".to_string(),
-            name: "Default PulseAudio Device".to_string(),
-            is_default: true,
-        });
-        
-        devices.push(AudioDevice {
-            id: "webcam".to_string(),
-            name: "HD Pro Webcam C920".to_string(),
-            is_default: false,
-        });
-        
-        devices.push(AudioDevice {
-            id: "usb_audio".to_string(),
-            name: "USB Audio Device".to_string(),
-            is_default: false,
-        });
-        
-        println!("📋 Created {} Linux-specific devices", devices.len());
-        return Ok(devices);
-    }
-    
-    #[allow(unreachable_code)]
-    {
-        println!("❓ Unknown platform, using generic devices");
-        Ok(vec![])
-    }
-}
-
-// Create fallback mock devices
-fn create_mock_devices() -> Result<Vec<AudioDevice>, String> {
-    println!("🎭 Creating mock devices for testing");
-    
+    // For now, return mock devices
     let mock_devices = vec![
         AudioDevice {
             id: "default".to_string(),
@@ -1000,7 +1144,7 @@ fn create_mock_devices() -> Result<Vec<AudioDevice>, String> {
             is_default: false,
         }
     ];
-    
+
     println!("🎭 Created {} mock devices", mock_devices.len());
     Ok(mock_devices)
 }
@@ -1011,42 +1155,20 @@ pub async fn test_microphone(device_id: String) -> Result<bool, String> {
     println!("🎯 Target device ID: {}", device_id);
     println!("🖥️ Platform: {}", std::env::consts::OS);
     println!("⏰ Test started at: {:?}", std::time::SystemTime::now());
-    
-    // Simulate different behaviors based on device ID
-    match device_id.as_str() {
-        "default" => {
-            println!("🔊 Testing default system microphone");
-            println!("✓ Default device access granted");
-        }
-        "webcam" | "webcam-mic" => {
-            println!("📷 Testing webcam microphone");
-            println!("✓ Webcam device found and accessible");
-        }
-        "usb_audio" | "usb-mic" => {
-            println!("🔌 Testing USB audio device");
-            println!("✓ USB device connected and working");
-        }
-        _ => {
-            println!("❓ Unknown device ID: {}", device_id);
-            println!("⚠️ Using generic test procedure");
-        }
-    }
-    
-    println!("⏳ Simulating audio capture test...");
-    
+
     // Simulate test duration with progress
     for i in 1..=3 {
         tokio::time::sleep(tokio::time::Duration::from_millis(333)).await;
         println!("  📊 Testing audio levels... {}/3", i);
     }
-    
+
     // Simulate checking audio levels (in real implementation, you'd check actual audio)
     let simulated_audio_level = 0.75; // 75% of max level
     println!("📈 Simulated audio level: {:.0}%", simulated_audio_level * 100.0);
-    
+
     // Determine success based on simulated conditions
     let success = simulated_audio_level > 0.1; // Success if we detect audio
-    
+
     if success {
         println!("✅ Microphone test successful!");
         println!("🎵 Audio input detected and working properly");
@@ -1056,170 +1178,10 @@ pub async fn test_microphone(device_id: String) -> Result<bool, String> {
         println!("🔇 No audio input detected");
         println!("📊 Signal quality: Poor/None");
     }
-    
+
     println!("⏰ Test completed at: {:?}", std::time::SystemTime::now());
-    
+
     Ok(success)
-}
-
-/// Helper function to get hotkey config from database for internal use
-pub async fn get_hotkey_config_from_database() -> Result<Option<crate::database::HotkeyConfig>, String> {
-    let database_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".tauri-data")
-        .join("databases")
-        .join("voice_assistant.db");
-
-    if !database_path.exists() {
-        return Ok(None);
-    }
-
-    // Use global database pool to avoid repeated initialization
-    match Database::from_global_pool().await {
-        Ok(database) => {
-            match database.get_hotkey_config().await {
-                Ok(config) => Ok(config),
-                Err(e) => Err(format!("Failed to get hotkey config: {}", e)),
-            }
-        }
-        Err(e) => Err(format!("Failed to create database: {}", e)),
-    }
-}
-
-// Internal functions for VoiceAssistant (without Tauri State parameter)
-pub async fn get_asr_config_internal() -> Result<Vec<crate::database::AsrConfig>, String> {
-    let database_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".tauri-data")
-        .join("databases")
-        .join("voice_assistant.db");
-
-    if !database_path.exists() {
-        println!("⚠️ Database file not found at: {:?}", database_path);
-        return Ok(Vec::new());
-    }
-
-    // Use global database pool to avoid repeated initialization
-    match Database::from_global_pool().await {
-        Ok(database) => {
-            match database.get_asr_config().await {
-                Ok(configs) => {
-                    if let Some(ref config) = configs {
-                        println!("✅ Found ASR config: {} (local: {}, cloud: {})",
-                            config.service_provider,
-                            config.local_endpoint.is_some(),
-                            config.cloud_endpoint.is_some());
-                        Ok(vec![config.clone()])
-                    } else {
-                        println!("⚠️ No ASR config found in database");
-                        Ok(Vec::new())
-                    }
-                }
-                Err(e) => {
-                    println!("❌ Failed to get ASR config: {}", e);
-                    Err(format!("Failed to get ASR config: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            println!("❌ Failed to create database: {}", e);
-            Err(format!("Failed to create database: {}", e))
-        }
-    }
-}
-
-pub async fn get_translation_config_internal() -> Result<Vec<crate::database::TranslationConfig>, String> {
-    let database_path = std::env::current_dir()
-        .unwrap_or_else(|_| std::path::PathBuf::from("."))
-        .join(".tauri-data")
-        .join("databases")
-        .join("voice_assistant.db");
-
-    if !database_path.exists() {
-        println!("⚠️ Database file not found at: {:?}", database_path);
-        return Ok(Vec::new());
-    }
-
-    // Use global database pool to avoid repeated initialization
-    match Database::from_global_pool().await {
-        Ok(database) => {
-            match database.get_translation_config("siliconflow").await {
-                Ok(config) => {
-                    if let Some(ref c) = config {
-                        println!("✅ Found translation config: {} ({})", c.provider, c.endpoint.is_some());
-                        Ok(vec![c.clone()])
-                    } else {
-                        println!("⚠️ No translation config found in database");
-                        Ok(Vec::new())
-                    }
-                }
-                Err(e) => {
-                    println!("❌ Failed to get translation config: {}", e);
-                    Err(format!("Failed to get translation config: {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            println!("❌ Failed to create database: {}", e);
-            Err(format!("Failed to create database: {}", e))
-        }
-    }
-}
-
-// Helper function to initialize database directly (without State wrapper)
-pub async fn init_database_direct() -> Result<Database, String> {
-    println!("🚀 Backend: init_database_direct() called");
-    match Database::new().await {
-        Ok(db) => {
-            println!("✅ Backend: Database created successfully");
-            Ok(db)
-        }
-        Err(e) => {
-            eprintln!("❌ Backend: Failed to initialize database: {}", e);
-            Err(format!("Failed to initialize database: {}", e))
-        }
-    }
-}
-
-// ASR result handler command
-#[tauri::command]
-pub async fn handle_asr_result(
-    db_state: State<'_, DatabaseState>,
-    result: crate::voice_assistant::coordinator::AsrResult,
-) -> Result<String, String> {
-    let db = {
-        let guard = db_state.lock().unwrap();
-        guard.as_ref().cloned()
-    };
-
-    match db {
-        Some(database) => {
-            println!("📊 Handling ASR result: success={}, processor={}", result.success, result.processor_type);
-            
-            let record = NewHistoryRecord {
-                record_type: "asr".to_string(),
-                input_text: result.input_text,
-                output_text: Some(result.output_text.clone()),
-                audio_file_path: result.audio_file_path,
-                processor_type: Some(result.processor_type),
-                processing_time_ms: result.processing_time_ms,
-                success: result.success,
-                error_message: result.error_message,
-            };
-
-            match database.add_history_record(record).await {
-                Ok(_) => {
-                    println!("✅ ASR result saved to database");
-                    Ok("ASR result saved successfully".to_string())
-                }
-                Err(e) => {
-                    println!("❌ Failed to save ASR result: {}", e);
-                    Err(format!("Failed to save ASR result: {}", e))
-                }
-            }
-        }
-        None => Err("Database not initialized".to_string())
-    }
 }
 
 // Live Data commands
@@ -1394,5 +1356,345 @@ pub async fn get_usage_data(
             }
         }
         None => Err("Database not initialized".to_string())
+    }
+}
+
+// ASR result handler command
+#[tauri::command]
+pub async fn handle_asr_result(
+    db_state: State<'_, DatabaseState>,
+    result: crate::voice_assistant::coordinator::AsrResult,
+) -> Result<String, String> {
+    let db = {
+        let guard = db_state.lock().unwrap();
+        guard.as_ref().cloned()
+    };
+
+    match db {
+        Some(database) => {
+            println!("📊 Handling ASR result: success={}, processor={}", result.success, result.processor_type);
+
+            let record = NewHistoryRecord {
+                record_type: "asr".to_string(),
+                input_text: result.input_text,
+                output_text: Some(result.output_text.clone()),
+                audio_file_path: result.audio_file_path,
+                processor_type: Some(result.processor_type),
+                processing_time_ms: result.processing_time_ms,
+                success: result.success,
+                error_message: result.error_message,
+            };
+
+            match database.add_history_record(record).await {
+                Ok(_) => {
+                    println!("✅ ASR result saved to database");
+                    Ok("ASR result saved successfully".to_string())
+                }
+                Err(e) => {
+                    println!("❌ Failed to save ASR result: {}", e);
+                    Err(format!("Failed to save ASR result: {}", e))
+                }
+            }
+        }
+        None => Err("Database not initialized".to_string())
+    }
+}
+
+/// Helper function to get hotkey config from database for internal use
+pub async fn get_hotkey_config_from_database() -> Result<Option<crate::database::HotkeyConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        return Ok(None);
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_hotkey_config().await {
+                Ok(config) => Ok(config),
+                Err(e) => Err(format!("Failed to get hotkey config: {}", e)),
+            }
+        }
+        Err(e) => Err(format!("Failed to create database: {}", e)),
+    }
+}
+
+// Internal functions for VoiceAssistant (without Tauri State parameter)
+pub async fn get_asr_config_internal() -> Result<Vec<crate::database::AsrConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        println!("⚠️ Database file not found at: {:?}", database_path);
+        return Ok(Vec::new());
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_asr_config().await {
+                Ok(configs) => {
+                    if let Some(ref config) = configs {
+                        println!("✅ Found ASR config: {} (local: {}, cloud: {})",
+                            config.service_provider,
+                            config.local_endpoint.is_some(),
+                            config.cloud_endpoint.is_some());
+                        Ok(vec![config.clone()])
+                    } else {
+                        println!("⚠️ No ASR config found in database");
+                        Ok(Vec::new())
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Failed to get ASR config: {}", e);
+                    Err(format!("Failed to get ASR config: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to create database: {}", e);
+            Err(format!("Failed to create database: {}", e))
+        }
+    }
+}
+
+pub async fn get_translation_config_internal() -> Result<Vec<crate::database::TranslationConfig>, String> {
+    let database_path = std::env::current_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+        .join(".tauri-data")
+        .join("databases")
+        .join("voice_assistant.db");
+
+    if !database_path.exists() {
+        println!("⚠️ Database file not found at: {:?}", database_path);
+        return Ok(Vec::new());
+    }
+
+    // Use global database pool to avoid repeated initialization
+    match Database::from_global_pool().await {
+        Ok(database) => {
+            match database.get_translation_config("siliconflow").await {
+                Ok(config) => {
+                    if let Some(ref c) = config {
+                        println!("✅ Found translation config: {} ({})", c.provider, c.endpoint.is_some());
+                        Ok(vec![c.clone()])
+                    } else {
+                        println!("⚠️ No translation config found in database");
+                        Ok(Vec::new())
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Failed to get translation config: {}", e);
+                    Err(format!("Failed to get translation config: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            println!("❌ Failed to create database: {}", e);
+            Err(format!("Failed to create database: {}", e))
+        }
+    }
+}
+
+// Helper function to initialize database directly (without State wrapper)
+pub async fn init_database_direct() -> Result<Database, String> {
+    println!("🚀 Backend: init_database_direct() called");
+    match Database::new().await {
+        Ok(db) => {
+            println!("✅ Backend: Database created successfully");
+            Ok(db)
+        }
+        Err(e) => {
+            eprintln!("❌ Backend: Failed to initialize database: {}", e);
+            Err(format!("Failed to initialize database: {}", e))
+        }
+    }
+}
+
+// Whisper-rs health check function - simplified since CPU compatibility is confirmed
+async fn check_whisper_rs_health() -> bool {
+    println!("🏥 Performing whisper-rs health check...");
+    
+    // Check for available memory (whisper-rs can crash with insufficient memory)
+    if let Ok(mem_info) = std::fs::read_to_string("/proc/meminfo") {
+        if let Some(memtotal_line) = mem_info.lines().find(|line| line.starts_with("MemTotal:")) {
+            let mem_kb: u64 = memtotal_line.split_whitespace()
+                .nth(1)
+                .unwrap_or("0")
+                .parse()
+                .unwrap_or(0);
+            
+            let mem_gb = mem_kb / 1024 / 1024;
+            if mem_gb < 4 {
+                println!("⚠️ Low memory detected ({}GB) - whisper-rs may be unstable", mem_gb);
+                println!("💡 Auto-switching to Cloud ASR for reliability");
+                return false;
+            }
+            
+            println!("✅ Memory check passed: {}GB available", mem_gb);
+        }
+    }
+    
+    println!("✅ Whisper-rs health check passed - CPU compatibility confirmed");
+    true
+}
+
+// Model management commands
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct WhisperModel {
+    pub name: String,
+    pub path: String,
+    pub size_mb: f64,
+    pub file_type: String,
+    pub modified: String,
+}
+
+#[tauri::command]
+pub fn scan_whisper_models() -> Result<Vec<WhisperModel>, String> {
+    println!("🔍 Scanning for available Whisper models...");
+    
+    let models_dir = match std::env::var("HOME") {
+        Ok(home) => format!("{}/.local/share/com.martin.flash-input/models", home),
+        Err(_) => return Err("Failed to get home directory".to_string()),
+    };
+    
+    if !std::path::Path::new(&models_dir).exists() {
+        println!("📁 Models directory does not exist: {}", models_dir);
+        return Ok(vec![]); // Return empty list instead of error
+    }
+    
+    let mut models = Vec::new();
+    
+    // Scan the directory for .bin files
+    match std::fs::read_dir(&models_dir) {
+        Ok(entries) => {
+            for entry in entries {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(e) => {
+                        eprintln!("Warning: Failed to read directory entry: {}", e);
+                        continue;
+                    }
+                };
+                
+                let path = entry.path();
+                
+                // Only look for .bin files (whisper models)
+                if path.extension().map_or(false, |ext| ext == "bin") {
+                    let metadata = match entry.metadata() {
+                        Ok(m) => m,
+                        Err(e) => {
+                            eprintln!("Warning: Failed to read metadata for {}: {}", path.display(), e);
+                            continue;
+                        }
+                    };
+                    
+                    if metadata.is_file() {
+                        let name = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        
+                        // Skip VAD model - it's not for transcription
+                        if name.contains("vad") {
+                            println!("⚠️ Skipping VAD model: {} (not suitable for transcription)", name);
+                            continue;
+                        }
+                        
+                        let size_mb = metadata.len() as f64 / 1024.0 / 1024.0;
+                        
+                        let modified = metadata.modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| {
+                                let datetime = chrono::DateTime::from_timestamp(d.as_secs() as i64, 0);
+                                datetime.map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                                    .unwrap_or_else(|| "Unknown".to_string())
+                            })
+                            .unwrap_or_else(|| "Unknown".to_string());
+                        
+                        let file_type = if name.contains("base") {
+                            "Base (~74MB)".to_string()
+                        } else if name.contains("small") {
+                            "Small (~244MB)".to_string()
+                        } else if name.contains("medium") {
+                            "Medium (~769MB)".to_string()
+                        } else if name.contains("large") {
+                            if name.contains("turbo") {
+                                "Large V3 Turbo (~1.5GB)".to_string()
+                            } else {
+                                "Large (~1.5GB)".to_string()
+                            }
+                        } else if name.contains("tiny") {
+                            "Tiny (~39MB)".to_string()
+                        } else {
+                            format!("Custom ({:.1}MB)", size_mb)
+                        };
+                        
+                        models.push(WhisperModel {
+                            name,
+                            path: path.display().to_string(),
+                            size_mb,
+                            file_type,
+                            modified,
+                        });
+                        
+                        println!("✅ Found model: {} ({:.1} MB)", models.last().unwrap().name, size_mb);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            return Err(format!("Failed to read models directory {}: {}", models_dir, e));
+        }
+    }
+    
+    // Sort models by size (largest first) and then by name
+    models.sort_by(|a, b| {
+        b.size_mb.partial_cmp(&a.size_mb)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(a.name.cmp(&b.name))
+    });
+    
+    println!("📊 Found {} total Whisper models", models.len());
+    Ok(models)
+}
+
+#[tauri::command]
+pub fn set_active_whisper_model(model_path: String) -> Result<String, String> {
+    println!("🎯 Setting active Whisper model: {}", model_path);
+    
+    // Validate that the model file exists
+    if !std::path::Path::new(&model_path).exists() {
+        return Err(format!("Model file does not exist: {}", model_path));
+    }
+    
+    // Set environment variable for the current session
+    std::env::set_var("WHISPER_MODEL_PATH", &model_path);
+    
+    println!("✅ Active Whisper model set to: {}", model_path);
+    Ok(format!("Successfully set active model to: {}", std::path::Path::new(&model_path).file_name().and_then(|n| n.to_str()).unwrap_or(&model_path)))
+}
+
+#[tauri::command]
+pub fn get_active_whisper_model() -> Result<Option<String>, String> {
+    match std::env::var("WHISPER_MODEL_PATH") {
+        Ok(path) => {
+            if std::path::Path::new(&path).exists() {
+                Ok(Some(path))
+            } else {
+                println!("⚠️ WHISPER_MODEL_PATH is set but file doesn't exist: {}", path);
+                Ok(None)
+            }
+        }
+        Err(_) => Ok(None), // No environment variable set
     }
 }

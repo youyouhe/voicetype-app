@@ -1,19 +1,17 @@
 use tauri::{AppHandle};
-use std::sync::{Arc, Mutex};
-use crate::voice_assistant::system_tray::SystemTrayManager;
+// use crate::voice_assistant::system_tray::SystemTrayManager;
 
 pub struct GlobalHotkeyManager {
     #[allow(dead_code)]
     app_handle: AppHandle,
-    #[allow(dead_code)]
-    system_tray_manager: Arc<Mutex<SystemTrayManager>>,
+    // system_tray_manager: Arc<Mutex<SystemTrayManager>>,
 }
 
 impl GlobalHotkeyManager {
-    pub fn new(app_handle: AppHandle, system_tray_manager: Arc<Mutex<SystemTrayManager>>) -> Self {
+    pub fn new(app_handle: AppHandle) -> Self {
         Self {
             app_handle,
-            system_tray_manager,
+            // system_tray_manager,
         }
     }
 

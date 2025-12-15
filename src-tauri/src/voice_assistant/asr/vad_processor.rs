@@ -39,8 +39,8 @@ impl WhisperVadProcessor {
         // Convert to our internal format
         let result = segments.into_iter()
             .map(|WhisperVadSegment { start, end }| VadSegment {
-                start_ms: start * 10, // Convert from centiseconds to milliseconds
-                end_ms: end * 10,
+                start_ms: (start * 10.0) as u64, // Convert from centiseconds to milliseconds
+                end_ms: (end * 10.0) as u64,
             })
             .collect();
 
@@ -118,7 +118,7 @@ pub fn filter_silence(
             // End of speech segment, add a small buffer
             in_speech = false;
             // Add a small buffer of silence to avoid cutting off words
-            let buffer_size = (16000 * 0.2) as usize; // 200ms buffer at 16kHz
+            let buffer_size = (16000.0 * 0.2) as usize; // 200ms buffer at 16kHz
             let buffer_end = (chunk.len() + buffer_size).min(audio_data.len());
             filtered_audio.extend_from_slice(&audio_data[chunk.len()..buffer_end]);
         }

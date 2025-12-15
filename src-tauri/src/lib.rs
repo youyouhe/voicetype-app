@@ -4,7 +4,6 @@ pub mod database;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
-use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -25,7 +24,8 @@ fn add(a: i32, b: i32) -> i32 {
 use voice_assistant::{
     start_voice_assistant, stop_voice_assistant, get_voice_assistant_state,
     get_voice_assistant_config, test_asr, test_translation, get_system_info,
-    SystemTrayManager, GlobalHotkeyManager, ensure_dependencies,
+    // SystemTrayManager, GlobalHotkeyManager, ensure_dependencies,
+    GlobalHotkeyManager, ensure_dependencies,
     // Model management commands
     get_available_models, download_model, delete_model, set_active_model,
     get_active_model_info, get_model_stats
@@ -41,7 +41,8 @@ use commands::{
     start_test_recording, get_audio_devices, test_microphone,
     test_asr_transcription,
     get_service_status, get_latency_data, get_usage_data,
-    handle_asr_result
+    handle_asr_result,
+    scan_whisper_models, set_active_whisper_model, get_active_whisper_model
 };
 
 use std::sync::{Arc, Mutex};
@@ -79,23 +80,23 @@ pub fn run() {
             crate::voice_assistant::coordinator::set_app_handle(app.handle().clone());
             println!("✅ Global app handle set for event emission");
 
-            // Initialize system tray manager
-            let system_tray_manager = Arc::new(Mutex::new(
-                SystemTrayManager::new(app.handle().clone())
-            ));
-            app.manage(system_tray_manager.clone());
+            // Initialize system tray manager - DISABLED DUE TO COMPILATION ISSUES
+            // let system_tray_manager = Arc::new(Mutex::new(
+            //     SystemTrayManager::new(app.handle().clone())
+            // ));
+            // app.manage(system_tray_manager.clone());
 
-            // Create system tray icon with menu items
-            match SystemTrayManager::create_tray_icon() {
-                Ok(tray) => {
-                    if let Err(e) = tray.build(app) {
-                        eprintln!("⚠️  Failed to build system tray: {}", e);
-                    } else {
-                        println!("✅ System tray created successfully");
-                    }
-                }
-                Err(e) => eprintln!("⚠️  Failed to create system tray: {}", e),
-            }
+            // // Create system tray icon with menu items
+            // match SystemTrayManager::create_tray_icon() {
+            //     Ok(tray) => {
+            //         if let Err(e) = tray.build(app) {
+            //             eprintln!("⚠️  Failed to build system tray: {}", e);
+            //         } else {
+            //             println!("✅ System tray created successfully");
+            //         }
+            //     }
+            //     Err(e) => eprintln!("⚠️  Failed to create system tray: {}", e),
+            // }
 
             // Create overlay window (initially hidden) - TEMPORARILY DISABLED
             // let tray_manager_ref = app.state::<Arc<Mutex<SystemTrayManager>>>();
@@ -109,10 +110,7 @@ pub fn run() {
             println!("ℹ️  Overlay window creation disabled for evaluation");
 
             // Initialize and register global hotkeys
-            let hotkey_manager = GlobalHotkeyManager::new(
-                app.handle().clone(),
-                system_tray_manager.clone()
-            );
+            let hotkey_manager = GlobalHotkeyManager::new(app.handle().clone());
 
             if let Err(e) = hotkey_manager.register_global_hotkeys() {
                 eprintln!("❌ Failed to register global hotkeys: {}", e);
@@ -163,7 +161,10 @@ pub fn run() {
             delete_model,
             set_active_model,
             get_active_model_info,
-            get_model_stats
+            get_model_stats,
+            scan_whisper_models,
+            set_active_whisper_model,
+            get_active_whisper_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

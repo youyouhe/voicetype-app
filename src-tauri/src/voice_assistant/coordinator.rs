@@ -7,7 +7,7 @@ use crate::voice_assistant::{
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
     WhisperProcessor, SenseVoiceProcessor, LocalASRProcessor,
     SiliconFlowTranslateProcessor, OllamaTranslateProcessor,
-    WhisperRSProcessor, EnhancedWhisperProcessor
+    WhisperRSProcessor // , EnhancedWhisperProcessor
 };
 use tracing::{info, error};
 
@@ -174,8 +174,8 @@ pub enum ProcessorType {
     LocalASR,
     #[serde(rename = "whisper-rs")]
     WhisperRS,
-    #[serde(rename = "enhanced-whisper")]
-    EnhancedWhisper,
+    // #[serde(rename = "enhanced-whisper")]
+    // EnhancedWhisper,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -273,8 +273,10 @@ impl VoiceAssistant {
                     .ok()
                     .and_then(|path| {
                         if std::path::Path::new(&path).exists() {
+                            println!("✅ Using active model from environment: {}", path);
                             Some(path)
                         } else {
+                            println!("⚠️ Environment model doesn't exist: {}", path);
                             None
                         }
                     })
@@ -288,51 +290,174 @@ impl VoiceAssistant {
                             None
                         }
                     })
+                    .or_else(|| {
+                        // Try to find models in the default data directory, preferring smaller models for CPU
+                        let home = std::env::var("HOME").ok()?;
+                        let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+
+                        // Try different models in order of preference
+                        let model_preferences = [
+                            "ggml-large-v3-turbo.bin", // ~1570MB - highest quality
+                            "ggml-small.bin",          // ~244MB - most stable for CPU
+                        ];
+
+                        for model in model_preferences {
+                            let model_file = format!("{}/{}", models_dir, model);
+                            if std::path::Path::new(&model_file).exists() {
+                                println!("✅ Found CPU-optimized model: {} ({}MB)",
+                                        model,
+                                        match model {
+                                            "ggml-large-v3-turbo.bin" => "1570",
+                                            "ggml-small.bin" => "244",
+                                            _ => "unknown",
+                                        });
+                                return Some(model_file);
+                            }
+                        }
+                        None
+                    })
                     .unwrap_or_else(|| {
-                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
-                        "./models/ggml-large-v3-turbo.bin".to_string()
+                        println!("⚠️ No Whisper model found. Please download a model to ~/.local/share/com.martin.flash-input/models/");
+                        println!("💡 Recommended models for CPU: ggml-base.bin (fastest) or ggml-small.bin (balanced)");
+                        println!("📥 Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main");
+                        "./models/ggml-base.bin".to_string()
                     });
 
                 println!("🎯 Using Whisper model: {}", model_path);
 
-                Arc::new(WhisperRSProcessor::with_model_path(&model_path)?)
-            },
-            ProcessorType::EnhancedWhisper => {
-                info!("Creating Enhanced Whisper processor (with VAD support)");
-                // Load model path with intelligent detection
-                let model_path = std::env::var("WHISPER_MODEL_PATH")
-                    .ok()
-                    .and_then(|path| {
-                        if std::path::Path::new(&path).exists() {
-                            Some(path)
-                        } else {
-                            None
+                {
+                    println!("🔧 Creating WhisperRSProcessor with model: {}", model_path);
+                    
+                    // Try to create WhisperRSProcessor with timeout to prevent indefinite hangs
+                    println!("⏱️ Creating WhisperRSProcessor with safety timeout...");
+                    
+                    let processor_result = std::thread::spawn(move || {
+                        // Use a simple timeout mechanism
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        
+                        // Spawn the processor creation in a separate thread
+                        std::thread::spawn(move || {
+                            let result = WhisperRSProcessor::with_model_path(&model_path);
+                            let _ = tx.send(result);
+                        });
+                        
+                        // Wait for up to 30 seconds for processor creation
+                        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                            Ok(processor_result) => processor_result,
+                            Err(_) => {
+                                eprintln!("⏰ WhisperRSProcessor creation timed out after 30 seconds");
+                                eprintln!("💡 This indicates a deadlock or infinite loop in whisper.cpp");
+                                Err(crate::voice_assistant::VoiceError::Other(
+                                    "WhisperRSProcessor creation timeout - possible whisper.cpp bug".to_string()
+                                ))
+                            }
                         }
-                    })
-                    .or_else(|| {
-                        // Try to find the model in the default data directory
-                        let home = std::env::var("HOME").ok()?;
-                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
-                        if std::path::Path::new(&model_file).exists() {
-                            Some(model_file)
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or_else(|| {
-                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
-                        "./models/ggml-large-v3-turbo.bin".to_string()
+                    }).join().unwrap_or_else(|_| {
+                        eprintln!("💥 WhisperRSProcessor creation thread panicked!");
+                        Err(crate::voice_assistant::VoiceError::Other(
+                            "WhisperRSProcessor creation thread panicked".to_string()
+                        ))
                     });
+                    
+                    match processor_result {
+                        Ok(processor) => {
+                            println!("✅ WhisperRSProcessor created successfully");
+                            Arc::new(processor)
+                        }
+                        Err(e) => {
+                            eprintln!("❌ Failed to create WhisperRSProcessor: {}", e);
+                            eprintln!("💡 Falling back to Cloud ASR processor...");
 
-                println!("🚀 Using Enhanced Whisper with VAD model: {}", model_path);
-
-                // Use beam search with VAD for better accuracy
-                Arc::new(EnhancedWhisperProcessor::with_beam_search_and_vad(
-                    &model_path,
-                    5,  // beam_size
-                    -1.0, // patience (default)
-                )?)
+                            // Fallback to Cloud ASR
+                            if config.service_platform == "groq" {
+                                println!("🔄 Fallback: Creating Whisper Cloud processor...");
+                                match WhisperProcessor::new() {
+                                    Ok(processor) => {
+                                        println!("✅ Cloud ASR fallback processor created successfully");
+                                        Arc::new(processor)
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Failed to create Cloud ASR fallback: {}", e);
+                                        eprintln!("💡 Trying SenseVoice as final fallback...");
+                                        match SenseVoiceProcessor::new() {
+                                            Ok(processor) => {
+                                                println!("✅ SenseVoice fallback processor created successfully");
+                                                Arc::new(processor)
+                                            }
+                                            Err(e) => {
+                                                eprintln!("❌ All ASR processors failed: {}", e);
+                                                return Err(crate::voice_assistant::VoiceError::Other(
+                                                    format!("All ASR processors failed. Primary error: {}, Cloud fallback failed: {}", e, e)
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                println!("🔄 Fallback: Creating SenseVoice Cloud processor...");
+                                match SenseVoiceProcessor::new() {
+                                    Ok(processor) => {
+                                        println!("✅ SenseVoice fallback processor created successfully");
+                                        Arc::new(processor)
+                                    }
+                                    Err(e) => {
+                                        eprintln!("❌ Failed to create SenseVoice fallback: {}", e);
+                                        eprintln!("💡 Trying Whisper Cloud as final fallback...");
+                                        match WhisperProcessor::new() {
+                                            Ok(processor) => {
+                                                println!("✅ Cloud ASR fallback processor created successfully");
+                                                Arc::new(processor)
+                                            }
+                                            Err(e) => {
+                                                eprintln!("❌ All ASR processors failed: {}", e);
+                                                return Err(crate::voice_assistant::VoiceError::Other(
+                                                    format!("All ASR processors failed. Primary error: {}, Cloud fallback failed: {}", e, e)
+                                                ));
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             },
+            // ProcessorType::EnhancedWhisper => {
+            //     info!("Creating Enhanced Whisper processor (with VAD support)");
+            //     // Load model path with intelligent detection
+            //     let model_path = std::env::var("WHISPER_MODEL_PATH")
+            //         .ok()
+            //         .and_then(|path| {
+            //             if std::path::Path::new(&path).exists() {
+            //                 Some(path)
+            //             } else {
+            //                 None
+            //             }
+            //         })
+            //         .or_else(|| {
+            //             // Try to find the model in the default data directory
+            //             let home = std::env::var("HOME").ok()?;
+            //             let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
+            //             if std::path::Path::new(&model_file).exists() {
+            //                 Some(model_file)
+            //             } else {
+            //                 None
+            //             }
+            //         })
+            //         .unwrap_or_else(|| {
+            //             println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
+            //             "./models/ggml-large-v3-turbo.bin".to_string()
+            //         });
+
+            //     println!("🚀 Using Enhanced Whisper with VAD model: {}", model_path);
+
+            //     // Use beam search with VAD for better accuracy
+            //     Arc::new(EnhancedWhisperProcessor::with_beam_search_and_vad(
+            //         &model_path,
+            //         5,  // beam_size
+            //         -1.0, // patience (default)
+            //     )?)
+            // },
         };
 
         // Create translation processor
@@ -407,8 +532,10 @@ impl VoiceAssistant {
                     .ok()
                     .and_then(|path| {
                         if std::path::Path::new(&path).exists() {
+                            println!("✅ Using active model from environment: {}", path);
                             Some(path)
                         } else {
+                            println!("⚠️ Environment model doesn't exist: {}", path);
                             None
                         }
                     })

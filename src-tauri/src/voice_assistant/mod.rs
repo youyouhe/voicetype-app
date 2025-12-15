@@ -6,7 +6,7 @@ pub mod asr;
 pub mod translate;
 pub mod coordinator;
 pub mod hotkey_parser;
-pub mod system_tray;
+// pub mod system_tray;
 pub mod global_hotkey;
 pub mod model_manager;
 
@@ -17,6 +17,6 @@ pub use asr::*;
 pub use translate::*;
 pub use logger::*;
 pub use coordinator::*;
-pub use system_tray::*;
+// pub use system_tray::*;
 pub use global_hotkey::*;
 pub use model_manager::*;

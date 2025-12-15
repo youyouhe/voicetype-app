@@ -1,0 +1,27 @@
+[
+{
+  "directory": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build",
+  "command": "/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/.  -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -o CMakeFiles/whisper.dir/ggml.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml.c",
+  "file": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml.c"
+},
+{
+  "directory": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build",
+  "command": "/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/.  -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -o CMakeFiles/whisper.dir/ggml-alloc.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-alloc.c",
+  "file": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-alloc.c"
+},
+{
+  "directory": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build",
+  "command": "/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/.  -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -o CMakeFiles/whisper.dir/ggml-backend.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-backend.c",
+  "file": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-backend.c"
+},
+{
+  "directory": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build",
+  "command": "/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/.  -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -o CMakeFiles/whisper.dir/ggml-quants.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-quants.c",
+  "file": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-quants.c"
+},
+{
+  "directory": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build",
+  "command": "/usr/bin/c++ -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/.  -DWHISPER_DEBUG -ffunction-sections -fdata-sections -fPIC -m64 -O2 -g -DNDEBUG -std=gnu++11 -o CMakeFiles/whisper.dir/whisper.cpp.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/whisper.cpp",
+  "file": "/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/whisper.cpp"
+}
+]

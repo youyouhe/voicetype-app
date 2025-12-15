@@ -1,0 +1,13 @@
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/whisper.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/edit_cache.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/rebuild_cache.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/list_install_components.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/install.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/install/local.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/install/strip.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/edit_cache.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/rebuild_cache.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/list_install_components.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/install.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/install/local.dir
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings/CMakeFiles/install/strip.dir

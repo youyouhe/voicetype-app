@@ -1,0 +1,3 @@
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/lib/static/libwhisper.a
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/include/ggml.h
+/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/include/whisper.h

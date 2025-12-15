@@ -1,0 +1,212 @@
+cargo:rustc-link-lib=dylib=stdc++
+cargo:rerun-if-changed=wrapper.h
+cargo:rerun-if-env-changed=TARGET
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64-unknown-linux-gnu
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS_x86_64_unknown_linux_gnu
+cargo:rerun-if-env-changed=BINDGEN_EXTRA_CLANG_ARGS
+cargo:rerun-if-changed=wrapper.h
+cargo:rerun-if-changed=./whisper.cpp/whisper.h
+cargo:rerun-if-changed=./whisper.cpp/ggml.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stdbool.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stddef.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/__stddef_max_align_t.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stdint.h
+cargo:rerun-if-changed=/usr/include/stdint.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/libc-header-start.h
+cargo:rerun-if-changed=/usr/include/features.h
+cargo:rerun-if-changed=/usr/include/features-time64.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/timesize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/stdc-predef.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/sys/cdefs.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/long-double.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/gnu/stubs.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/gnu/stubs-64.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/features.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/timesize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/typesizes.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/time64.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wchar.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/wordsize.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/stdint-intn.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/stdio.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/libc-header-start.h
+cargo:rerun-if-changed=/usr/include/features.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stddef.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stdarg.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/__fpos_t.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/__fpos64_t.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/__mbstate_t.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/__FILE.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/FILE.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/types.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/stdio_lim.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/floatn.h
+cargo:rerun-if-changed=/usr/include/features.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/floatn-common.h
+cargo:rerun-if-changed=/usr/include/features.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/long-double.h
+cargo:rerun-if-changed=/usr/include/x86_64-linux-gnu/bits/floatn.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stddef.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stdint.h
+cargo:rerun-if-changed=/usr/lib/llvm-14/lib/clang/14.0.0/include/stdbool.h
+cargo:rerun-if-changed=./whisper.cpp/ggml.h
+CMAKE_TOOLCHAIN_FILE_x86_64-unknown-linux-gnu = None
+CMAKE_TOOLCHAIN_FILE_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_TOOLCHAIN_FILE = None
+CMAKE_TOOLCHAIN_FILE = None
+CMAKE_GENERATOR_x86_64-unknown-linux-gnu = None
+CMAKE_GENERATOR_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_GENERATOR = None
+CMAKE_GENERATOR = None
+CMAKE_PREFIX_PATH_x86_64-unknown-linux-gnu = None
+CMAKE_PREFIX_PATH_x86_64_unknown_linux_gnu = None
+HOST_CMAKE_PREFIX_PATH = None
+CMAKE_PREFIX_PATH = None
+CMAKE_x86_64-unknown-linux-gnu = None
+CMAKE_x86_64_unknown_linux_gnu = None
+HOST_CMAKE = None
+CMAKE = None
+Running with debug output on.
+-- The C compiler identification is GNU 11.4.0
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerId.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeDetermineCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- The CXX compiler identification is GNU 11.4.0
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerId.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeDetermineCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting C compiler ABI info
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting C compiler ABI info - done
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Check for working C compiler: /usr/bin/cc - skipped
+   Called from: [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting C compile features
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompileFeatures.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting C compile features - done
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompileFeatures.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting CXX compiler ABI info
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting CXX compiler ABI info - done
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompilerABI.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Check for working CXX compiler: /usr/bin/c++ - skipped
+   Called from: [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting CXX compile features
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompileFeatures.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Detecting CXX compile features - done
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CMakeDetermineCompileFeatures.cmake
+                [2]	/usr/share/cmake-3.22/Modules/CMakeTestCXXCompiler.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Found Git: /usr/bin/git (found version "2.34.1") 
+   Called from: [5]	/usr/share/cmake-3.22/Modules/FindPackageMessage.cmake
+                [4]	/usr/share/cmake-3.22/Modules/FindPackageHandleStandardArgs.cmake
+                [3]	/usr/share/cmake-3.22/Modules/FindGit.cmake
+                [2]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/cmake/GitVars.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Looking for pthread.h
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CheckIncludeFile.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Looking for pthread.h - found
+   Called from: [3]	/usr/share/cmake-3.22/Modules/CheckIncludeFile.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+   Called from: [4]	/usr/share/cmake-3.22/Modules/Internal/CheckSourceCompiles.cmake
+                [3]	/usr/share/cmake-3.22/Modules/CheckCSourceCompiles.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+   Called from: [4]	/usr/share/cmake-3.22/Modules/Internal/CheckSourceCompiles.cmake
+                [3]	/usr/share/cmake-3.22/Modules/CheckCSourceCompiles.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Found Threads: TRUE  
+   Called from: [4]	/usr/share/cmake-3.22/Modules/FindPackageMessage.cmake
+                [3]	/usr/share/cmake-3.22/Modules/FindPackageHandleStandardArgs.cmake
+                [2]	/usr/share/cmake-3.22/Modules/FindThreads.cmake
+                [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- CMAKE_SYSTEM_PROCESSOR: x86_64
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- x86 detected
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Configuring done
+-- Generating /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/CMakeLists.txt
+-- Generating /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/bindings
+   Called from: [1]	/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/bindings/CMakeLists.txt
+-- Generating done
+-- Build files have been written to: /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build
+/usr/bin/cmake -S/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp -B/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build --check-build-system CMakeFiles/Makefile.cmake 0
+/usr/bin/cmake -E cmake_progress_start /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build//CMakeFiles/progress.marks
+/usr/bin/gmake  -f CMakeFiles/Makefile2 all
+gmake[1]: Entering directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+/usr/bin/gmake  -f CMakeFiles/whisper.dir/build.make CMakeFiles/whisper.dir/depend
+gmake[2]: Entering directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+cd /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build && /usr/bin/cmake -E cmake_depends "Unix Makefiles" /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles/whisper.dir/DependInfo.cmake --color=
+gmake[2]: Leaving directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+/usr/bin/gmake  -f CMakeFiles/whisper.dir/build.make CMakeFiles/whisper.dir/build
+gmake[2]: Entering directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+[ 16%] Building C object CMakeFiles/whisper.dir/ggml.c.o
+/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/. -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -MD -MT CMakeFiles/whisper.dir/ggml.c.o -MF CMakeFiles/whisper.dir/ggml.c.o.d -o CMakeFiles/whisper.dir/ggml.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml.c
+[ 33%] Building C object CMakeFiles/whisper.dir/ggml-backend.c.o
+/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/. -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -MD -MT CMakeFiles/whisper.dir/ggml-backend.c.o -MF CMakeFiles/whisper.dir/ggml-backend.c.o.d -o CMakeFiles/whisper.dir/ggml-backend.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-backend.c
+[ 50%] Building C object CMakeFiles/whisper.dir/ggml-alloc.c.o
+[ 66%] Building C object CMakeFiles/whisper.dir/ggml-quants.c.o
+/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/. -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -MD -MT CMakeFiles/whisper.dir/ggml-alloc.c.o -MF CMakeFiles/whisper.dir/ggml-alloc.c.o.d -o CMakeFiles/whisper.dir/ggml-alloc.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-alloc.c
+/usr/bin/cc -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/. -ffunction-sections -fdata-sections -fPIC -m64 -mavx -mavx2 -mfma -mf16c -O2 -g -DNDEBUG -MD -MT CMakeFiles/whisper.dir/ggml-quants.c.o -MF CMakeFiles/whisper.dir/ggml-quants.c.o.d -o CMakeFiles/whisper.dir/ggml-quants.c.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/ggml-quants.c
+[ 83%] Building CXX object CMakeFiles/whisper.dir/whisper.cpp.o
+/usr/bin/c++ -D_GNU_SOURCE -D_XOPEN_SOURCE=600 -I/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/. -DWHISPER_DEBUG -ffunction-sections -fdata-sections -fPIC -m64 -O2 -g -DNDEBUG -std=gnu++11 -MD -MT CMakeFiles/whisper.dir/whisper.cpp.o -MF CMakeFiles/whisper.dir/whisper.cpp.o.d -o CMakeFiles/whisper.dir/whisper.cpp.o -c /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/whisper.cpp/whisper.cpp
+[100%] Linking CXX static library libwhisper.a
+/usr/bin/cmake -P CMakeFiles/whisper.dir/cmake_clean_target.cmake
+/usr/bin/cmake -E cmake_link_script CMakeFiles/whisper.dir/link.txt --verbose=1
+/usr/bin/ar qc libwhisper.a CMakeFiles/whisper.dir/ggml.c.o CMakeFiles/whisper.dir/ggml-alloc.c.o CMakeFiles/whisper.dir/ggml-backend.c.o CMakeFiles/whisper.dir/ggml-quants.c.o CMakeFiles/whisper.dir/whisper.cpp.o
+/usr/bin/ranlib libwhisper.a
+gmake[2]: Leaving directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+[100%] Built target whisper
+gmake[1]: Leaving directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+/usr/bin/cmake -E cmake_progress_start /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build/CMakeFiles 0
+/usr/bin/gmake  -f CMakeFiles/Makefile2 preinstall
+gmake[1]: Entering directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+gmake[1]: Nothing to be done for 'preinstall'.
+gmake[1]: Leaving directory '/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build'
+Install the project...
+/usr/bin/cmake -P cmake_install.cmake
+-- Install configuration: "RelWithDebInfo"
+-- Installing: /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/lib/static/libwhisper.a
+-- Installing: /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/include/ggml.h
+-- Installing: /home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/include/whisper.h
+cargo:root=/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out
+cargo:rustc-link-search=/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out/build
+cargo:rustc-link-search=native=/home/martin/hello-tauri/whisper-test/target/debug/build/whisper-rs-sys-2b9068d7f3d15325/out
+cargo:rustc-link-lib=static=whisper

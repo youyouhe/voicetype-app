@@ -1,0 +1,8 @@
+[package]
+name = "whisper-test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+whisper-rs = { version = "0.15", features = ["raw-api"] }
+hound = "3.5"
