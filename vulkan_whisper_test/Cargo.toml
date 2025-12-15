@@ -1,0 +1,10 @@
+[package]
+name = "vulkan_whisper_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+whisper-rs = { version = "0.15", features = ["vulkan"] }  # 启用Vulkan支持
+hound = "3.5"  # for WAV file reading
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full"] }

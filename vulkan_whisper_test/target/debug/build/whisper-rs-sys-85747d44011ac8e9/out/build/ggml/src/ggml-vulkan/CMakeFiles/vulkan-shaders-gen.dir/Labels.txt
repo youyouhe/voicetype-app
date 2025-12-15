@@ -1,0 +1,13 @@
+# Target labels
+ vulkan-shaders-gen
+# Source files and their labels
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/CMakeFiles/vulkan-shaders-gen
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/CMakeFiles/vulkan-shaders-gen.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/CMakeFiles/vulkan-shaders-gen-complete.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-build.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-configure.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-download.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-install.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-mkdir.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-patch.rule
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-update.rule

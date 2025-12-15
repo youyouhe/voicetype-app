@@ -1,0 +1,11 @@
+# Hashes of file build rules.
+ce3bddba902eef64f1f3456419f16ed3 ggml/src/ggml-vulkan/CMakeFiles/vulkan-shaders-gen
+70aa4dd5700085e40475e42c49e1f66c ggml/src/ggml-vulkan/CMakeFiles/vulkan-shaders-gen-complete
+9bd46439c850d299134240f478f889ff ggml/src/ggml-vulkan/ggml-vulkan-shaders.hpp
+18a13ae8af6a4926f974493595e9e396 ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-build
+5e8e0001e3237b71feb746c810ce3253 ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-configure
+13b287a9098fac0ce5651c4c1d32b19d ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-download
+4a665817aa0e6bb185d69e053c003906 ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-install
+6723a0a9ca83d089676142aef09ae4cc ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-mkdir
+626e4519c8642666ec727278cb51ec69 ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-patch
+2351d89f8b9dda064b2360ba100f4182 ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-stamp/vulkan-shaders-gen-update

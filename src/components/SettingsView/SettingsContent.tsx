@@ -99,6 +99,7 @@ export const ASRSettings: React.FC = () => {
 
   // File input state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [currentWhisperModel, setCurrentWhisperModel] = useState<string>('small'); // Track current model
 
   // Check if running in Tauri environment
   const isTauriEnvironment = () => {
@@ -263,6 +264,12 @@ export const ASRSettings: React.FC = () => {
             setLocalApiKey(config.local_api_key || '');
             setLocalEndpoint(config.local_endpoint || 'http://localhost:5001/inference');
             setCloudEndpoint(config.cloud_endpoint || 'https://api.siliconflow.cn/v1/audio/transcriptions');
+            
+            // Load whisper model from config
+            if (config.whisper_model) {
+              setCurrentWhisperModel(config.whisper_model);
+              console.log('🎯 Loaded whisper model from config:', config.whisper_model);
+            }
 
             // Auto run health check after loading config - DISABLED to prevent infinite loops
             // if (config.service_provider && (config.local_endpoint || config.cloud_endpoint)) {
@@ -653,7 +660,7 @@ export const ASRSettings: React.FC = () => {
                       Local Whisper uses whisper-rs for on-device inference. The system automatically detects and uses your downloaded model at:
                     </p>
                     <code className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded mt-2 block font-mono">
-                      ~/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin
+                      ~/.local/share/com.martin.flash-input/models/ggml-{currentWhisperModel}.bin
                     </code>
                     <p className="text-sm text-blue-700 mt-2">
                       No configuration required - just ensure the model file is present.

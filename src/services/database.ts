@@ -31,6 +31,7 @@ export interface AsrConfig {
   local_api_key?: string;
   cloud_endpoint?: string;
   cloud_api_key?: string;
+  whisper_model?: string; // NEW: Selected whisper model
   created_at: string;
   updated_at: string;
 }
@@ -63,6 +64,7 @@ export interface AsrConfigRequest {
   local_api_key?: string;
   cloud_endpoint?: string;
   cloud_api_key?: string;
+  whisper_model?: string; // NEW: Selected whisper model
 }
 
 export interface TranslationConfigRequest {

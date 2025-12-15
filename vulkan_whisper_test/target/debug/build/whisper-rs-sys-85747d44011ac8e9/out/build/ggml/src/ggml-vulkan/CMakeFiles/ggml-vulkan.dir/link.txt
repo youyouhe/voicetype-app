@@ -1,0 +1,2 @@
+/usr/bin/ar qc libggml-vulkan.a CMakeFiles/ggml-vulkan.dir/ggml-vulkan.cpp.o CMakeFiles/ggml-vulkan.dir/ggml-vulkan-shaders.cpp.o
+/usr/bin/ranlib libggml-vulkan.a

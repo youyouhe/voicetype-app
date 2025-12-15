@@ -3,6 +3,7 @@ pub mod recorder;
 pub mod keyboard;
 pub mod logger;
 pub mod asr;
+pub mod global_whisper;
 pub mod translate;
 pub mod coordinator;
 pub mod hotkey_parser;

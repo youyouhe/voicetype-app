@@ -1,0 +1,1 @@
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/RelWithDebInfo/./vulkan-shaders-gen

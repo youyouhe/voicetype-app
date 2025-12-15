@@ -34,7 +34,6 @@ export const ModelDownload: React.FC = () => {
   useEffect(() => {
     loadModels();
     loadStats();
-    loadActiveModel();
     
     // Set up event listeners for download progress
     const setupEventListeners = async () => {
@@ -106,6 +105,9 @@ export const ModelDownload: React.FC = () => {
       setLoading(true);
       const modelsData = await TauriService.getAvailableModels();
       setModels(modelsData);
+      
+      // Load active model after models are loaded
+      await loadActiveModel(modelsData);
     } catch (error) {
       console.error('Failed to load models:', error);
       setError('Failed to load models');
@@ -123,15 +125,53 @@ export const ModelDownload: React.FC = () => {
     }
   };
 
-  const loadActiveModel = async () => {
+  const loadActiveModel = async (modelsList: any[]) => {
     try {
-      const activeModelPath = await TauriService.getActiveModelInfo();
-      if (activeModelPath) {
-        const active = models.find(m => m.file_path === activeModelPath);
+      console.log('🔍 Loading active model from ASR config...');
+      
+      // 1. Try to load from ASR config first (persistent storage)
+      const { DatabaseService } = await import('../../services/database');
+      const asrConfig = await DatabaseService.getAsrConfig();
+      
+      if (asrConfig?.whisper_model) {
+        console.log('✅ Found model in ASR config:', asrConfig.whisper_model);
+        const active = modelsList.find(m => m.name === asrConfig.whisper_model);
         if (active) {
           setActiveModel(active.name);
+          console.log('✅ Active model set from ASR config:', active.name);
+          return;
+        } else {
+          console.log('⚠️ Model from ASR config not found in models list:', asrConfig.whisper_model);
         }
       }
+      
+      // 2. Fallback to environment variable method
+      console.log('⚠️ No valid model found in ASR config, checking environment variable...');
+      const activeModelPath = await TauriService.getActiveModelInfo();
+      if (activeModelPath) {
+        const active = modelsList.find(m => m.file_path === activeModelPath);
+        if (active) {
+          setActiveModel(active.name);
+          console.log('✅ Active model set from environment variable:', active.name);
+          
+          // Save to ASR config for future persistence
+          const updatedConfig = {
+            service_provider: asrConfig?.service_provider || 'local',
+            local_endpoint: asrConfig?.local_endpoint,
+            local_api_key: asrConfig?.local_api_key,
+            cloud_endpoint: asrConfig?.cloud_endpoint,
+            cloud_api_key: asrConfig?.cloud_api_key,
+            whisper_model: active.name,
+          };
+          await DatabaseService.saveAsrConfig(updatedConfig);
+          console.log('💾 Migrated model selection to ASR config');
+          return;
+        } else {
+          console.log('⚠️ Model from environment not found in models list:', activeModelPath);
+        }
+      }
+      
+      console.log('ℹ️ No active model found, using default');
     } catch (error) {
       console.error('Failed to load active model:', error);
     }
@@ -181,8 +221,45 @@ export const ModelDownload: React.FC = () => {
 
   const handleSetActive = async (modelName: string) => {
     try {
+      console.log(`🎯 Setting active model: ${modelName}`);
+      
+      // 1. Set active model via environment variable (for compatibility)
       await TauriService.setActiveModel(modelName);
+      
+      // 2. Reload global WhisperRS processor with new model (primary method)
+      console.log('🔄 Reloading global WhisperRS processor...');
+      const { invoke } = await import('@tauri-apps/api/core');
+      
+      try {
+        await invoke('reload_whisper_processor', { modelPath: `ggml-${modelName}.bin` });
+        console.log('✅ Global WhisperRS processor reloaded successfully');
+      } catch (reloadError) {
+        console.warn('⚠️ Failed to reload global processor, continuing with environment variable method:', reloadError);
+      }
+      
+      // 2. Save model selection to ASR config for persistence
+      const { DatabaseService } = await import('../../services/database');
+      
+      // Get current ASR config to preserve other settings
+      const currentConfig = await DatabaseService.getAsrConfig();
+      
+      // Create updated config with new model selection
+      const updatedConfig = {
+        service_provider: currentConfig?.service_provider || 'local',
+        local_endpoint: currentConfig?.local_endpoint,
+        local_api_key: currentConfig?.local_api_key,
+        cloud_endpoint: currentConfig?.cloud_endpoint,
+        cloud_api_key: currentConfig?.cloud_api_key,
+        whisper_model: modelName, // NEW: Save selected model
+      };
+      
+      console.log('💾 Saving model selection to ASR config:', updatedConfig);
+      await DatabaseService.saveAsrConfig(updatedConfig);
+      
+      // Update local state
       setActiveModel(modelName);
+      console.log('✅ Model selection and processor setup completed successfully');
+      
     } catch (error) {
       console.error('Failed to set active model:', error);
       setError(`Failed to set active model: ${error}`);

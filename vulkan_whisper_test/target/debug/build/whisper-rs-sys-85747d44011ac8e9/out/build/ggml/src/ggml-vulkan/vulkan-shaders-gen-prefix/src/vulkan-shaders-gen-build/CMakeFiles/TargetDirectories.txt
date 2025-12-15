@@ -1,0 +1,7 @@
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/vulkan-shaders-gen.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/edit_cache.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/rebuild_cache.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/list_install_components.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/install.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/install/local.dir
+/home/martin/hello-tauri/vulkan_whisper_test/target/debug/build/whisper-rs-sys-85747d44011ac8e9/out/build/ggml/src/ggml-vulkan/vulkan-shaders-gen-prefix/src/vulkan-shaders-gen-build/CMakeFiles/install/strip.dir

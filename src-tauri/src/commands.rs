@@ -5,6 +5,8 @@ use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
+pub mod gpu_backend;
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {
     pub id: String,
@@ -66,6 +68,7 @@ pub struct AsrConfigRequest {
     pub local_api_key: Option<String>,
     pub cloud_endpoint: Option<String>,
     pub cloud_api_key: Option<String>,
+    pub whisper_model: Option<String>, // NEW: Selected whisper model
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -214,6 +217,7 @@ pub async fn save_asr_config(
             // Debug: Log the values being saved
             println!("💾 Rust: Saving ASR config:");
             println!("  - service_provider: {}", request.service_provider);
+            println!("  - whisper_model: {:?}", request.whisper_model);
             println!("  - local_api_key present: {}", request.local_api_key.is_some());
             println!("  - local_api_key length: {:?}", request.local_api_key.as_ref().map(|k| k.len()));
             println!("  - local_api_key preview: {:?}", request.local_api_key.as_ref().map(|k| &k[..k.len().min(20)]));
@@ -226,6 +230,7 @@ pub async fn save_asr_config(
                 request.local_api_key.as_deref(),
                 request.cloud_endpoint.as_deref(),
                 request.cloud_api_key.as_deref(),
+                request.whisper_model.as_deref(), // NEW: Pass whisper model
             ).await {
                 Ok(config) => {
                     println!("✅ Rust: ASR config saved successfully");
@@ -662,8 +667,48 @@ async fn test_local_whisper_transcription(
         });
     }
 
-    // Create WhisperRS processor
-    let processor = match create_local_whisper_processor().await {
+    // Create or get global WhisperRS processor
+    let model_path = std::env::var("WHISPER_MODEL_PATH")
+        .ok()
+        .and_then(|path| {
+            if std::path::Path::new(&path).exists() {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .or_else(|| {
+            // Try to find models in the default data directory
+            let home = std::env::var("HOME").ok()?;
+            let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+
+            // Model preference order for testing (small to large)
+            let model_preferences = [
+                "ggml-small.bin",          // Good balance of speed and accuracy
+                "ggml-base.bin",           // Fastest
+                "ggml-medium.bin",         // Better accuracy
+                "ggml-large-v3-turbo.bin", // Best accuracy
+            ];
+
+            for model in model_preferences {
+                let model_file = format!("{}/{}", models_dir, model);
+                if std::path::Path::new(&model_file).exists() {
+                    println!("✅ Found available model for testing: {}", model);
+                    return Some(model_file);
+                }
+            }
+            None
+        })
+        .unwrap_or_else(|| {
+            println!("⚠️ No Whisper model found in default directory");
+            println!("💡 Please download a model to ~/.local/share/com.martin.flash-input/models/");
+            println!("📥 Recommended: ggml-small.bin for good performance");
+            "ggml-small.bin".to_string() // Fallback for error message
+        });
+
+    println!("🎯 Using Whisper model path: {}", model_path);
+    
+    let processor = match crate::voice_assistant::global_whisper::get_or_create_whisper_processor(&model_path).await {
         Ok(processor) => processor,
         Err(e) => {
             return Ok(AsrTestResponse {
@@ -671,7 +716,7 @@ async fn test_local_whisper_transcription(
                 transcription: None,
                 processing_time_ms: start_time.elapsed().as_millis() as u64,
                 file_size,
-                message: format!("Failed to create Local Whisper processor: {}", e),
+                message: format!("Failed to get/create global Whisper processor: {}", e),
                 status_code: None,
             });
         }
@@ -679,11 +724,18 @@ async fn test_local_whisper_transcription(
 
     // Convert audio bytes to WAV format and process
     let audio_cursor = std::io::Cursor::new(audio_data.clone());
-    let transcription_result = match processor.process_audio(
-        audio_cursor,
-        crate::voice_assistant::Mode::Transcriptions,
-        "",
-    ) {
+    
+    // Scope the processor lock to avoid holding it across await
+    let transcription_result = {
+        let processor_guard = processor.lock().unwrap();
+        processor_guard.process_audio(
+            audio_cursor,
+            crate::voice_assistant::Mode::Transcriptions,
+            "",
+        )
+    };
+    
+    let transcription_result = match transcription_result {
         Ok(result) => {
             println!("✅ Local Whisper processing succeeded!");
             result
@@ -899,6 +951,7 @@ async fn test_cloud_asr_transcription(
 }
 
 // Helper function to create Local Whisper processor
+#[allow(dead_code)]
 async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr::whisper_rs::WhisperRSProcessor, String> {
     use crate::voice_assistant::asr::whisper_rs::{WhisperRSProcessor, WhisperRSConfig, SamplingStrategyConfig};
 
@@ -967,12 +1020,24 @@ async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr:
         println!("ℹ️  VAD disabled (set WHISPER_ENABLE_VAD=true to enable)");
     }
 
+    // Auto-detect optimal GPU backend
+    let gpu_detector = crate::voice_assistant::asr::gpu_detector::GpuDetector::new();
+    let optimal_backend = gpu_detector.get_preferred_backend();
+
     let config = WhisperRSConfig {
         model_path,
         sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
         language: None, // Auto-detect
         translate: false,
         enable_vad,
+        backend: optimal_backend.clone(),
+        use_gpu_if_available: std::env::var("WHISPER_USE_GPU")
+            .unwrap_or_else(|_| "true".to_string())
+            .parse::<bool>()
+            .unwrap_or(true),
+        gpu_device_id: std::env::var("WHISPER_GPU_DEVICE_ID")
+            .ok()
+            .and_then(|id| id.parse::<u32>().ok()),
     };
 
       // Use thread-safe creation with timeout to prevent crashes
