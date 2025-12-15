@@ -45,6 +45,15 @@ use commands::{
     scan_whisper_models, set_active_whisper_model, get_active_whisper_model
 };
 
+// Import global whisper manager commands
+use voice_assistant::global_whisper::{get_whisper_manager_status, reload_whisper_processor, clear_whisper_processor};
+
+// Import GPU backend commands
+use commands::gpu_backend::{
+    get_gpu_backend_status, set_preferred_gpu_backend, redetect_gpu_backends,
+    get_backend_details, test_backend_performance
+};
+
 use std::sync::{Arc, Mutex};
 use commands::DatabaseState;
 
@@ -71,6 +80,27 @@ pub fn run() {
             Err(e) => eprintln!("❌ Failed to initialize database on startup: {}", e),
         }
     });
+
+    // Initialize and perform GPU backend detection on startup
+    println!("🔍 Initializing GPU backend detection...");
+    let gpu_detector = voice_assistant::asr::gpu_detector::get_gpu_detector();
+    let detector_guard = gpu_detector.lock().unwrap();
+
+    println!("📊 GPU Backend Detection Results:");
+    println!("   Available Backends:");
+    for backend in detector_guard.get_available_backends() {
+        let priority = detector_guard.backend_priority(&backend);
+        let status = if backend == detector_guard.get_preferred_backend() {
+            "✅ SELECTED"
+        } else {
+            "✓ Available"
+        };
+        println!("     - {} (Priority: {}) {}", backend, priority, status);
+    }
+
+    println!("   Preferred Backend: {}", detector_guard.get_preferred_backend());
+    println!("   Backend Info: {}", detector_guard.get_backend_info());
+    println!("🎯 GPU backend detection completed!");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -155,16 +185,39 @@ pub fn run() {
             get_latency_data,
             get_usage_data,
             handle_asr_result,
-            // Model management commands
+            // Model management commands - ONLY use file-based scanning commands
+            // scan_whisper_models,      // ⭐️ ACTIVE - Scans actual model files
+            // set_active_whisper_model, // ⭐️ ACTIVE - Sets model via environment
+            // get_active_whisper_model, // ⭐️ ACTIVE - Gets active model from env
+            
+            // ❌ DISABLED - Redundant hardcoded model management
+            // get_available_models,     // Conflicts with scan_whisper_models
+            // download_model,           // Uses hardcoded URLs, not flexible
+            // delete_model,             // Uses hardcoded model list
+            // set_active_model,         // Conflicts with set_active_whisper_model  
+            // get_active_model_info,    // Uses hardcoded model list
+            // get_model_stats,          // Uses hardcoded model list
+            
+            // 🎯 TEMP: Keep both for now during transition
+            scan_whisper_models,
+            set_active_whisper_model,
+            get_active_whisper_model,
             get_available_models,
             download_model,
             delete_model,
             set_active_model,
             get_active_model_info,
             get_model_stats,
-            scan_whisper_models,
-            set_active_whisper_model,
-            get_active_whisper_model
+            // Global WhisperRS manager commands
+            get_whisper_manager_status,
+            reload_whisper_processor,
+            clear_whisper_processor,
+            // GPU backend management commands
+            get_gpu_backend_status,
+            set_preferred_gpu_backend,
+            redetect_gpu_backends,
+            get_backend_details,
+            test_backend_performance
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

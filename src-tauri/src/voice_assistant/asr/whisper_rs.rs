@@ -11,13 +11,43 @@ pub enum SamplingStrategyConfig {
     Beam { beam_size: u32, patience: f32 },
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub enum WhisperBackend {
+    CPU,
+    CUDA,
+    Vulkan,
+    Metal,     // Apple Silicon
+    OpenCL,    // Fallback for older GPUs
+}
+
+impl Default for WhisperBackend {
+    fn default() -> Self {
+        Self::CPU
+    }
+}
+
+impl std::fmt::Display for WhisperBackend {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WhisperBackend::CPU => write!(f, "CPU"),
+            WhisperBackend::CUDA => write!(f, "CUDA"),
+            WhisperBackend::Vulkan => write!(f, "Vulkan"),
+            WhisperBackend::Metal => write!(f, "Metal"),
+            WhisperBackend::OpenCL => write!(f, "OpenCL"),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WhisperRSConfig {
     pub model_path: String,
     pub sampling_strategy: SamplingStrategyConfig,
     pub language: Option<String>,
     pub translate: bool,
-    pub enable_vad: bool,  // Add VAD option
+    pub enable_vad: bool,
+    pub backend: WhisperBackend,
+    pub use_gpu_if_available: bool,
+    pub gpu_device_id: Option<u32>,
 }
 
 pub struct WhisperRSProcessor {
@@ -70,12 +100,20 @@ impl WhisperRSProcessor {
                 "./models/ggml-base.bin".to_string()
             });
 
+        // 自动检测最佳GPU后端
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+
         let config = WhisperRSConfig {
             model_path,
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None, // Auto-detect
             translate: false,
             enable_vad: false, // Default VAD disabled
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
 
         Self::new(config)
@@ -396,23 +434,51 @@ impl WhisperRSProcessor {
 // Factory functions for easy creation
 impl WhisperRSProcessor {
     pub fn with_model_path(model_path: &str) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None,
             translate: false,
-            enable_vad: false, // Default VAD disabled
+            enable_vad: false,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
+        };
+        Self::new(config)
+    }
+
+    pub fn with_model_path_and_backend(model_path: &str, backend: WhisperBackend) -> Result<Self, VoiceError> {
+        let config = WhisperRSConfig {
+            model_path: model_path.to_string(),
+            sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
+            language: None,
+            translate: false,
+            enable_vad: false,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
 
     pub fn with_language(model_path: &str, language: &str) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: Some(language.to_string()),
             translate: false,
-            enable_vad: false, // Default VAD disabled
+            enable_vad: false,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
@@ -422,35 +488,56 @@ impl WhisperRSProcessor {
         beam_size: u32,
         patience: f32,
     ) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Beam { beam_size, patience },
             language: None,
             translate: false,
-            enable_vad: false, // Default VAD disabled
+            enable_vad: false,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
 
     // Factory functions with VAD support
     pub fn with_model_path_and_vad(model_path: &str, enable_vad: bool) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None,
             translate: false,
             enable_vad,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
 
     pub fn with_language_and_vad(model_path: &str, language: &str, enable_vad: bool) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: Some(language.to_string()),
             translate: false,
             enable_vad,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
@@ -461,12 +548,19 @@ impl WhisperRSProcessor {
         patience: f32,
         enable_vad: bool,
     ) -> Result<Self, VoiceError> {
+        let gpu_detector_mutex = super::gpu_detector::get_gpu_detector();
+        let gpu_detector = gpu_detector_mutex.lock().unwrap();
+        let backend = gpu_detector.get_preferred_backend().clone();
+        
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             sampling_strategy: SamplingStrategyConfig::Beam { beam_size, patience },
             language: None,
             translate: false,
             enable_vad,
+            backend,
+            use_gpu_if_available: true,
+            gpu_device_id: None,
         };
         Self::new(config)
     }
