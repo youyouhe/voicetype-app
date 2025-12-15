@@ -6,22 +6,25 @@ use crate::voice_assistant::{AsrProcessor, Mode, VoiceError};
 use std::time::Instant;
 
 #[derive(Debug, Clone)]
-pub struct WhisperRSConfig {
-    pub model_path: String,
-    pub sampling_strategy: SamplingStrategyConfig,
-    pub language: Option<String>,
-    pub translate: bool,
-}
-
-#[derive(Debug, Clone)]
 pub enum SamplingStrategyConfig {
     Greedy { best_of: u32 },
     Beam { beam_size: u32, patience: f32 },
 }
 
+#[derive(Debug, Clone)]
+pub struct WhisperRSConfig {
+    pub model_path: String,
+    pub sampling_strategy: SamplingStrategyConfig,
+    pub language: Option<String>,
+    pub translate: bool,
+    pub enable_vad: bool,  // Add VAD option
+}
+
 pub struct WhisperRSProcessor {
     ctx: Arc<WhisperContext>,
     config: WhisperRSConfig,
+    // VAD flag for basic energy-based VAD (thread-safe alternative)
+    enable_basic_vad: bool,
     // For thread-safe access if needed
     _state_guard: Mutex<()>,
 }
@@ -44,9 +47,18 @@ impl WhisperRSProcessor {
             VoiceError::Other(format!("Failed to load whisper model: {}", e))
         })?;
 
+        // Initialize VAD functionality
+        let enable_basic_vad = if config.enable_vad {
+            println!("🎯 Enabling basic energy-based VAD (thread-safe alternative)");
+            true
+        } else {
+            false
+        };
+
         Ok(Self {
             ctx: Arc::new(ctx),
             config,
+            enable_basic_vad,
             _state_guard: Mutex::new(()),
         })
     }
@@ -63,6 +75,7 @@ impl WhisperRSProcessor {
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None, // Auto-detect
             translate: false,
+            enable_vad: false, // Default VAD disabled
         };
 
         Self::new(config)
@@ -139,9 +152,30 @@ impl WhisperRSProcessor {
         // whisper.cpp expects 16kHz mono f32 audio
         let processed_audio = self.preprocess_audio(audio_data);
 
-        // Check if we have enough audio data
-        if processed_audio.len() < 1024 {
-            return Err(VoiceError::Other("Audio too short for processing".to_string()));
+        // Apply VAD filtering if enabled
+        let final_audio = if self.config.enable_vad {
+            println!("🎯 VAD is enabled - processing audio...");
+            match self.apply_vad_filtering(&processed_audio) {
+                Ok(filtered_audio) => {
+                    let original_len = processed_audio.len();
+                    let filtered_len = filtered_audio.len();
+                    let reduction = (original_len - filtered_len) as f64 / original_len as f64 * 100.0;
+                    println!("✅ VAD filtered: {} -> {} samples (reduced {:.1}% audio)", 
+                             original_len, filtered_len, reduction);
+                    filtered_audio
+                }
+                Err(e) => {
+                    println!("⚠️ VAD filtering failed: {}, using original audio", e);
+                    processed_audio.clone()
+                }
+            }
+        } else {
+            processed_audio.clone()
+        };
+
+        // Check if we have enough audio data (after VAD filtering)
+        if final_audio.len() < 1024 {
+            return Err(VoiceError::Other("Audio too short for processing after VAD filtering".to_string()));
         }
 
         // Determine mode based on configuration
@@ -154,7 +188,7 @@ impl WhisperRSProcessor {
         let params = self.create_params(mode);
 
         // Run inference
-        state.full(params, &processed_audio)
+        state.full(params, &final_audio)
             .map_err(|e| VoiceError::Other(format!("Whisper inference failed: {}", e)))?;
 
         // Use the iterator pattern for cleaner result collection
@@ -173,7 +207,7 @@ impl WhisperRSProcessor {
         }
 
         let processing_time = start_time.elapsed();
-        let audio_duration = processed_audio.len() as f32 / 16000.0;
+        let audio_duration = final_audio.len() as f32 / 16000.0;
         let real_time_factor = processing_time.as_secs_f32() / audio_duration;
 
         println!("🎯 WhisperRS processing completed in {:?}", processing_time);
@@ -286,6 +320,77 @@ impl WhisperRSProcessor {
             }
         }
     }
+
+    fn apply_vad_filtering(&self, audio_data: &[f32]) -> Result<Vec<f32>, VoiceError> {
+        if self.enable_basic_vad {
+            println!("🎯 Applying basic energy-based VAD filtering to {} audio samples", audio_data.len());
+            
+            let filtered_audio = self.basic_energy_vad(audio_data);
+            
+            println!("✅ Basic VAD filtered: {} -> {} samples (removed {:.1}% non-speech audio)", 
+                     audio_data.len(), filtered_audio.len(), 
+                     (1.0 - filtered_audio.len() as f64 / audio_data.len() as f64) * 100.0);
+            
+            Ok(filtered_audio)
+        } else {
+            println!("⚠️ VAD not enabled, returning original audio");
+            Ok(audio_data.to_vec())
+        }
+    }
+
+    // Basic energy-based VAD implementation (thread-safe)
+    fn basic_energy_vad(&self, audio_data: &[f32]) -> Vec<f32> {
+        let window_size = 1024; // 64ms windows at 16kHz
+        let overlap = 512; // 32ms overlap
+        let energy_threshold = 0.01; // Energy threshold for speech detection
+        
+        if audio_data.len() < window_size {
+            return audio_data.to_vec();
+        }
+        
+        let mut speech_segments = Vec::new();
+        let mut in_speech = false;
+        let mut speech_start = 0;
+        
+        // Process audio in windows
+        for i in (0..audio_data.len() - window_size + 1).step_by(overlap) {
+            let window = &audio_data[i..i + window_size];
+            
+            // Calculate RMS energy
+            let energy: f32 = (window.iter().map(|&x| x * x).sum::<f32>() / window_size as f32).sqrt();
+            
+            if energy > energy_threshold {
+                if !in_speech {
+                    // Start of speech segment
+                    speech_start = i;
+                    in_speech = true;
+                }
+            } else {
+                if in_speech {
+                    // End of speech segment
+                    speech_segments.push((speech_start, i));
+                    in_speech = false;
+                }
+            }
+        }
+        
+        // Handle case where speech extends to end
+        if in_speech {
+            speech_segments.push((speech_start, audio_data.len()));
+        }
+        
+        // Merge speech segments into continuous audio
+        let total_samples: usize = speech_segments.iter()
+            .map(|(start, end)| end - start)
+            .sum();
+        
+        let mut filtered_audio = Vec::with_capacity(total_samples);
+        for (start, end) in speech_segments {
+            filtered_audio.extend_from_slice(&audio_data[start..end]);
+        }
+        
+        filtered_audio
+    }
 }
 
 // Factory functions for easy creation
@@ -296,6 +401,7 @@ impl WhisperRSProcessor {
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None,
             translate: false,
+            enable_vad: false, // Default VAD disabled
         };
         Self::new(config)
     }
@@ -306,6 +412,7 @@ impl WhisperRSProcessor {
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: Some(language.to_string()),
             translate: false,
+            enable_vad: false, // Default VAD disabled
         };
         Self::new(config)
     }
@@ -320,6 +427,46 @@ impl WhisperRSProcessor {
             sampling_strategy: SamplingStrategyConfig::Beam { beam_size, patience },
             language: None,
             translate: false,
+            enable_vad: false, // Default VAD disabled
+        };
+        Self::new(config)
+    }
+
+    // Factory functions with VAD support
+    pub fn with_model_path_and_vad(model_path: &str, enable_vad: bool) -> Result<Self, VoiceError> {
+        let config = WhisperRSConfig {
+            model_path: model_path.to_string(),
+            sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
+            language: None,
+            translate: false,
+            enable_vad,
+        };
+        Self::new(config)
+    }
+
+    pub fn with_language_and_vad(model_path: &str, language: &str, enable_vad: bool) -> Result<Self, VoiceError> {
+        let config = WhisperRSConfig {
+            model_path: model_path.to_string(),
+            sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
+            language: Some(language.to_string()),
+            translate: false,
+            enable_vad,
+        };
+        Self::new(config)
+    }
+
+    pub fn with_beam_search_and_vad(
+        model_path: &str,
+        beam_size: u32,
+        patience: f32,
+        enable_vad: bool,
+    ) -> Result<Self, VoiceError> {
+        let config = WhisperRSConfig {
+            model_path: model_path.to_string(),
+            sampling_strategy: SamplingStrategyConfig::Beam { beam_size, patience },
+            language: None,
+            translate: false,
+            enable_vad,
         };
         Self::new(config)
     }
