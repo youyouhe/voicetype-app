@@ -678,9 +678,8 @@ async fn test_local_whisper_transcription(
             }
         })
         .or_else(|| {
-            // Try to find models in the default data directory
-            let home = std::env::var("HOME").ok()?;
-            let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+            // Try to find models in the default data directory using cross-platform API
+            let models_dir = crate::utils::platform::get_models_dir();
 
             // Model preference order for testing (small to large)
             let model_preferences = [
@@ -691,17 +690,17 @@ async fn test_local_whisper_transcription(
             ];
 
             for model in model_preferences {
-                let model_file = format!("{}/{}", models_dir, model);
-                if std::path::Path::new(&model_file).exists() {
+                let model_file = models_dir.join(model);
+                if model_file.exists() {
                     println!("✅ Found available model for testing: {}", model);
-                    return Some(model_file);
+                    return Some(model_file.to_string_lossy().to_string());
                 }
             }
             None
         })
         .unwrap_or_else(|| {
             println!("⚠️ No Whisper model found in default directory");
-            println!("💡 Please download a model to ~/.local/share/com.martin.flash-input/models/");
+            println!("💡 Please download a model to {:?}", crate::utils::platform::get_models_dir());
             println!("📥 Recommended: ggml-small.bin for good performance");
             "ggml-small.bin".to_string() // Fallback for error message
         });
@@ -967,8 +966,7 @@ async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr:
         })
         .or_else(|| {
             // Try to find models in the default data directory, preferring smaller models for CPU
-            let home = std::env::var("HOME").ok()?;
-            let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+            let models_dir = crate::utils::platform::get_models_dir().to_string_lossy().to_string();
 
             // Model preference order for CPU (smallest to largest)
             let model_preferences = [
@@ -996,12 +994,12 @@ async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr:
             None
         })
         .unwrap_or_else(|| {
-            println!("⚠️ No Whisper model found. Please download a model to ~/.local/share/com.martin.flash-input/models/");
+            println!("⚠️ No Whisper model found. Please download a model to {:?}", crate::utils::platform::get_models_dir());
             println!("💡 Recommended models for CPU: ggml-base.bin (fastest) or ggml-small.bin (balanced)");
             println!("📥 Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main");
             println!("🔧 Quick download commands:");
             println!("   # For base model (fastest, 74MB):");
-            println!("   wget -O ~/.local/share/com.martin.flash-input/models/ggml-base.bin \\");
+            println!("   wget -O {}/ggml-base.bin \\", crate::utils::platform::get_models_dir().display());
             println!("     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin");
             "./models/ggml-base.bin".to_string()
         });
@@ -1626,10 +1624,7 @@ pub struct WhisperModel {
 pub fn scan_whisper_models() -> Result<Vec<WhisperModel>, String> {
     println!("🔍 Scanning for available Whisper models...");
     
-    let models_dir = match std::env::var("HOME") {
-        Ok(home) => format!("{}/.local/share/com.martin.flash-input/models", home),
-        Err(_) => return Err("Failed to get home directory".to_string()),
-    };
+    let models_dir = crate::utils::platform::get_models_dir().to_string_lossy().to_string();
     
     if !std::path::Path::new(&models_dir).exists() {
         println!("📁 Models directory does not exist: {}", models_dir);
