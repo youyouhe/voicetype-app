@@ -42,3 +42,7 @@ sqlx = { version = "0.8.2", features = ["runtime-tokio-rustls", "sqlite", "chron
 uuid = { version = "1.11.0", features = ["v4", "serde"] }
 whisper-rs = "0.15"
 
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["winuser", "winnt", "processenv", "handleapi"] }
+windows = { version = "0.58", features = ["Win32_UI_Shell", "Win32_Foundation", "Win32_System_Environment"] }
+

@@ -577,6 +577,10 @@ mod tests {
             sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
             language: Some("en".to_string()),
             translate: false,
+            backend: WhisperBackend::CPU,
+            use_gpu_if_available: false,
+            gpu_device_id: None,
+            enable_vad: false,
         };
         
         assert_eq!(config.model_path, "test.bin");

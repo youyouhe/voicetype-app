@@ -282,18 +282,17 @@ impl VoiceAssistant {
                     })
                     .or_else(|| {
                         // Try to find the model in the default data directory
-                        let home = std::env::var("HOME").ok()?;
-                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
-                        if std::path::Path::new(&model_file).exists() {
-                            Some(model_file)
+                        let models_dir = crate::utils::platform::get_models_dir();
+                        let model_file = models_dir.join("ggml-large-v3-turbo.bin");
+                        if model_file.exists() {
+                            Some(model_file.to_string_lossy().to_string())
                         } else {
                             None
                         }
                     })
                     .or_else(|| {
                         // Try to find models in the default data directory, preferring smaller models for CPU
-                        let home = std::env::var("HOME").ok()?;
-                        let models_dir = format!("{}/.local/share/com.martin.flash-input/models", home);
+                        let models_dir = crate::utils::platform::get_models_dir();
 
                         // Try different models in order of preference
                         let model_preferences = [
@@ -302,8 +301,8 @@ impl VoiceAssistant {
                         ];
 
                         for model in model_preferences {
-                            let model_file = format!("{}/{}", models_dir, model);
-                            if std::path::Path::new(&model_file).exists() {
+                            let model_file = models_dir.join(model);
+                            if model_file.exists() {
                                 println!("✅ Found CPU-optimized model: {} ({}MB)",
                                         model,
                                         match model {
@@ -311,13 +310,13 @@ impl VoiceAssistant {
                                             "ggml-small.bin" => "244",
                                             _ => "unknown",
                                         });
-                                return Some(model_file);
+                                return Some(model_file.to_string_lossy().to_string());
                             }
                         }
                         None
                     })
                     .unwrap_or_else(|| {
-                        println!("⚠️ No Whisper model found. Please download a model to ~/.local/share/com.martin.flash-input/models/");
+                        println!("⚠️ No Whisper model found. Please download a model to {:?}", crate::utils::platform::get_models_dir());
                         println!("💡 Recommended models for CPU: ggml-base.bin (fastest) or ggml-small.bin (balanced)");
                         println!("📥 Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main");
                         "./models/ggml-base.bin".to_string()
@@ -541,16 +540,16 @@ impl VoiceAssistant {
                     })
                     .or_else(|| {
                         // Try to find the model in the default data directory
-                        let home = std::env::var("HOME").ok()?;
-                        let model_file = format!("{}/.local/share/com.martin.flash-input/models/ggml-large-v3-turbo.bin", home);
-                        if std::path::Path::new(&model_file).exists() {
-                            Some(model_file)
+                        let models_dir = crate::utils::platform::get_models_dir();
+                        let model_file = models_dir.join("ggml-large-v3-turbo.bin");
+                        if model_file.exists() {
+                            Some(model_file.to_string_lossy().to_string())
                         } else {
                             None
                         }
                     })
                     .unwrap_or_else(|| {
-                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to ~/.local/share/com.martin.flash-input/models/ or set WHISPER_MODEL_PATH");
+                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to {}/ or set WHISPER_MODEL_PATH", crate::utils::platform::get_models_dir().display());
                         "./models/ggml-large-v3-turbo.bin".to_string()
                     });
 
