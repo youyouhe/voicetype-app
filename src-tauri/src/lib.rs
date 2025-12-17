@@ -1,6 +1,7 @@
 pub mod voice_assistant;
 pub mod commands;
 pub mod database;
+pub mod utils;
 
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
