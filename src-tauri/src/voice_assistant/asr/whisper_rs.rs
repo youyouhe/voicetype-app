@@ -229,11 +229,19 @@ impl WhisperRSProcessor {
         state.full(params, &final_audio)
             .map_err(|e| VoiceError::Other(format!("Whisper inference failed: {}", e)))?;
 
-        // Use the iterator pattern for cleaner result collection
+        // Extract text from whisper results using the state directly
         let mut result_text = String::new();
 
-        for segment in state.as_iter() {
-            let segment_text = segment.to_string();
+        // Get the number of segments from the state
+        let num_segments = state
+            .full_n_segments()
+            .map_err(|e| VoiceError::Other(format!("Failed to get number of segments: {}", e)))?;
+
+        for i in 0..num_segments {
+            let segment_text = state
+                .full_get_segment_text(i)
+                .map_err(|e| VoiceError::Other(format!("Failed to get segment text: {}", e)))?;
+
             let clean_segment = segment_text.trim().to_string();
 
             if !clean_segment.is_empty() {

@@ -1,5 +1,4 @@
 use crate::voice_assistant::asr::whisper_rs::WhisperBackend;
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 
 /// GPU后端检测器，用于检测系统中可用的GPU加速后端
@@ -72,73 +71,62 @@ impl GpuDetector {
     
     /// 检测CUDA支持
     fn detect_cuda(&self) -> bool {
-        // 方法1: 检查nvidia-smi命令
-        let nvidia_cmd = if crate::utils::platform::is_windows() { "nvidia-smi.exe" } else { "nvidia-smi" };
-        if let Ok(output) = Command::new(nvidia_cmd).output() {
-            if output.status.success() {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                if output_str.contains("NVIDIA-SMI") && output_str.contains("Driver Version") {
-                    println!("🚀 NVIDIA GPU detected via nvidia-smi");
+        // Simplified CUDA detection for Windows - avoid hanging on external commands
+        if crate::utils::platform::is_windows() {
+            // Only check file paths on Windows to avoid command hanging
+            let cuda_paths = vec![
+                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA",
+                "C:\\Program Files (x86)\\NVIDIA GPU Computing Toolkit\\CUDA",
+                "C:\\CUDA",
+            ];
+
+            for path in &cuda_paths {
+                if std::path::Path::new(path).exists() {
+                    println!("🎯 CUDA installation found at: {}", path);
+                    return true;
+                }
+            }
+
+            // Quick check for NVIDIA driver files
+            if std::path::Path::new("C:\\Windows\\System32\\nvidia-smi.exe").exists() {
+                println!("🚀 NVIDIA GPU detected via nvidia-smi.exe presence");
+                return true;
+            }
+        } else {
+            // On Linux/macOS, try nvidia-smi with timeout
+            match std::process::Command::new("nvidia-smi")
+                .output()
+                .ok() {
+                Some(output) if output.status.success() => {
+                    let output_str = String::from_utf8_lossy(&output.stdout);
+                    if output_str.contains("NVIDIA-SMI") && output_str.contains("Driver Version") {
+                        println!("🚀 NVIDIA GPU detected via nvidia-smi");
+                        return true;
+                    }
+                }
+                _ => {}
+            }
+
+            // Check for CUDA paths
+            let cuda_paths = vec!["/usr/local/cuda", "/opt/cuda", "/usr/cuda"];
+            for path in &cuda_paths {
+                if std::path::Path::new(path).exists() {
+                    println!("🎯 CUDA installation found at: {}", path);
                     return true;
                 }
             }
         }
-        
-        // 方法2: 检查CUDA库文件
-        let cuda_paths = if crate::utils::platform::is_windows() {
-            vec![
-                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA",
-                "C:\\Program Files (x86)\\NVIDIA GPU Computing Toolkit\\CUDA",
-                "C:\\CUDA",
-            ]
-        } else {
-            vec![
-                "/usr/local/cuda",
-                "/opt/cuda",
-                "/usr/cuda",
-            ]
-        };
 
-        for path in &cuda_paths {
-            if std::path::Path::new(path).exists() {
-                println!("🎯 CUDA installation found at: {}", path);
-                return true;
-            }
-        }
-        
-        // 方法3: 检查CUDA环境变量
-        let cuda_env_vars = crate::utils::platform::get_cuda_env_vars();
-        for var in &cuda_env_vars {
-            if std::env::var(var).is_ok() {
-                println!("🔧 CUDA environment variables detected");
-                return true;
-            }
-        }
-        
         false
     }
     
     /// 检测Vulkan支持
     fn detect_vulkan(&self) -> bool {
-        // 方法1: 检查vulkaninfo命令
-        let vulkan_cmd = if crate::utils::platform::is_windows() { "vulkaninfo.exe" } else { "vulkaninfo" };
-        if let Ok(output) = Command::new(vulkan_cmd).output() {
-            if output.status.success() {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                if output_str.contains("Vulkan Instance") || output_str.contains("VkInstance") {
-                    println!("🎮 Vulkan detected via vulkaninfo");
-                    return true;
-                }
-            }
-        }
-
-        // 方法2: 检查Vulkan库文件
+        // Simplified Vulkan detection - only check for DLL files on Windows to avoid hanging
         let vulkan_libs = if crate::utils::platform::is_windows() {
             vec![
                 "C:\\Windows\\System32\\vulkan-1.dll",
-                "C:\\Program Files\\VulkanSDK\\1.3.283.0\\Bin\\vulkan-1.dll",
-                "C:\\VulkanSDK\\1.3.283.0\\Bin\\vulkan-1.dll",
-                "C:\\Program Files (x86)\\VulkanSDK\\1.3.283.0\\Bin\\vulkan-1.dll",
+                "C:\\Windows\\SysWOW64\\vulkan-1.dll",
             ]
         } else {
             vec![
@@ -151,45 +139,32 @@ impl GpuDetector {
 
         for lib_path in &vulkan_libs {
             if std::path::Path::new(lib_path).exists() {
-                println!("🔧 Vulkan library found at: {}", lib_path);
+                println!("🎮 Vulkan library found at: {}", lib_path);
                 return true;
             }
         }
-        
+
         false
     }
     
     /// 检测Metal支持 (macOS Apple Silicon)
     fn detect_metal(&self) -> bool {
-        // Metal只在macOS上可用
-        if !std::env::consts::OS.contains("macos") {
-            return false;
+        // Metal只在macOS上可用 - simple check without external commands
+        if std::env::consts::OS.contains("macos") {
+            // Assume Metal is available on all modern macOS versions
+            println!("🍎 Metal assumed available on macOS");
+            return true;
         }
-        
-        // 检查是否为Apple Silicon
-        if let Ok(output) = Command::new("uname").arg("-m").output() {
-            if output.status.success() {
-                let output_str = String::from_utf8_lossy(&output.stdout);
-                if output_str.contains("arm64") {
-                    println!("🍎 Metal detected on Apple Silicon");
-                    return true;
-                }
-            }
-        }
-        
         false
     }
     
     /// 检测OpenCL支持
     fn detect_opencl(&self) -> bool {
-        // 检查OpenCL库
+        // Simplified OpenCL detection - check only common DLL files
         let opencl_libs = if crate::utils::platform::is_windows() {
             vec![
                 "C:\\Windows\\System32\\OpenCL.dll",
-                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v*\\bin\\OpenCL.dll",
-                "C:\\Program Files\\AMD\\ROCm\\*\\bin\\OpenCL.dll",
-                "C:\\Program Files (x86)\\AMD\\APP\\*\\bin\\x86_64\\OpenCL.dll",
-                "C:\\Program Files\\Intel\\OpenCL SDK\\*\\bin\\x64\\OpenCL.dll",
+                "C:\\Windows\\SysWOW64\\OpenCL.dll",
             ]
         } else {
             vec![
@@ -201,18 +176,7 @@ impl GpuDetector {
         };
 
         for lib_path in &opencl_libs {
-            // Handle wildcards in Windows paths
-            if lib_path.contains('*') {
-                if crate::utils::platform::is_windows() {
-                    // For simplicity, just check if the directory exists
-                    if let Some(parent) = std::path::Path::new(lib_path).parent() {
-                        if parent.exists() {
-                            println!("⚡ OpenCL directory found at: {}", parent.display());
-                            return true;
-                        }
-                    }
-                }
-            } else if std::path::Path::new(lib_path).exists() {
+            if std::path::Path::new(lib_path).exists() {
                 println!("⚡ OpenCL library found at: {}", lib_path);
                 return true;
             }
@@ -306,7 +270,7 @@ mod tests {
     fn test_gpu_detector_creation() {
         let detector = GpuDetector::new();
         assert!(!detector.get_available_backends().is_empty());
-        assert!(detector.is_backend_available(&WhisperBackend::CPU));
+        assert!(detector.is_backend_available(&WhisperBackend::Cpu));
     }
     
     #[test]

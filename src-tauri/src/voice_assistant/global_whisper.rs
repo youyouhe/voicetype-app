@@ -52,8 +52,8 @@ impl GlobalWhisperManager {
 
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
-            sampling_strategy: crate::voice_assistant::asr::whisper_rs::SamplingStrategyConfig::Greedy { best_of: 1 },
             language: None, // Auto-detect
+            sampling_strategy: crate::voice_assistant::asr::whisper_rs::SamplingStrategyConfig::Greedy { best_of: 1 },
             translate: false,
             enable_vad: std::env::var("WHISPER_ENABLE_VAD")
                 .unwrap_or_else(|_| "false".to_string())
