@@ -5,7 +5,7 @@ use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-pub mod gpu_backend;
+// pub mod gpu_backend;  // Temporarily disabled for Windows migration
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {
@@ -230,7 +230,6 @@ pub async fn save_asr_config(
                 request.local_api_key.as_deref(),
                 request.cloud_endpoint.as_deref(),
                 request.cloud_api_key.as_deref(),
-                request.whisper_model.as_deref(), // NEW: Pass whisper model
             ).await {
                 Ok(config) => {
                     println!("✅ Rust: ASR config saved successfully");
@@ -1024,8 +1023,8 @@ async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr:
 
     let config = WhisperRSConfig {
         model_path,
-        sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
         language: None, // Auto-detect
+        sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
         translate: false,
         enable_vad,
         backend: optimal_backend.clone(),

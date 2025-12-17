@@ -509,10 +509,17 @@ export const ASRSettings: React.FC = () => {
       setAsrResult(null);
       setAsrTestMessage('Processing audio file...');
 
-      // Convert file to base64 for transfer to Rust
+      // Convert file to base64 for transfer to Rust (chunked approach for large files)
       const arrayBuffer = await selectedFile.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
-      const base64Data = btoa(String.fromCharCode(...uint8Array));
+      let base64Data = '';
+      const chunkSize = 0x8000; // 32KB chunks
+
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.subarray(i, i + chunkSize);
+        base64Data += String.fromCharCode.apply(null, Array.from(chunk));
+      }
+      base64Data = btoa(base64Data);
 
       // Call Rust backend for ASR transcription
       const request: any = {
