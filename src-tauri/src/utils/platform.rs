@@ -10,7 +10,7 @@ pub fn get_user_data_dir() -> PathBuf {
             PathBuf::from(appdata).join("com.martin.flash-input")
         } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
             // Fallback to User Profile
-            userprofile.into()
+            PathBuf::from(userprofile)
                 .join("AppData")
                 .join("Roaming")
                 .join("com.martin.flash-input")
