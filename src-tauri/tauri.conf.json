@@ -5,7 +5,7 @@
   "identifier": "com.martin.flash-input",
   "build": {
     "beforeDevCommand": "cd src && npm run dev",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "cd src && npm run build",
     "frontendDist": "../src/dist"
   },

@@ -1,50 +1,79 @@
 use std::path::Path;
-use whisper_rs::{WhisperVadContext, WhisperVadContextParams, WhisperVadParams, WhisperVadSegment};
 use crate::voice_assistant::VoiceError;
 
+// Temporary VAD processor using energy-based detection
+// TODO: Replace with whisper-rs VAD API when available
 pub struct WhisperVadProcessor {
-    vad_ctx: WhisperVadContext,
+    sample_rate: u32,
+    threshold: f32,
+    window_size: usize,
 }
 
 impl WhisperVadProcessor {
-    pub fn new(model_path: &str) -> Result<Self, VoiceError> {
-        if !Path::new(model_path).exists() {
-            return Err(VoiceError::Other(format!(
-                "VAD model file not found: {}",
-                model_path
-            )));
-        }
+    pub fn new(_model_path: &str) -> Result<Self, VoiceError> {
+        // For now, ignore model_path and use energy-based VAD
+        println!("⚠️  Using energy-based VAD (whisper-rs VAD API not available)");
 
-        let mut vad_ctx_params = WhisperVadContextParams::default();
-        vad_ctx_params.set_n_threads(1);
-        vad_ctx_params.set_use_gpu(false);
-
-        let vad_ctx = WhisperVadContext::new(model_path, vad_ctx_params)
-            .map_err(|e| VoiceError::Other(format!("Failed to load VAD model: {}", e)))?;
-
-        Ok(Self { vad_ctx })
+        Ok(Self {
+            sample_rate: 16000,
+            threshold: 0.01f32,
+            window_size: 1024,
+        })
     }
 
-    /// Detect speech segments in audio data
-    pub fn detect_speech_segments(&mut self, audio_data: &[f32]) -> Result<Vec<VadSegment>, VoiceError> {
+    /// Detect speech segments in audio data using energy-based detection
+    pub fn detect_speech_segments(&self, audio_data: &[f32]) -> Result<Vec<VadSegment>, VoiceError> {
         if audio_data.is_empty() {
             return Ok(Vec::new());
         }
 
-        let vad_params = WhisperVadParams::new();
-        let segments = self.vad_ctx
-            .segments_from_samples(vad_params, audio_data)
-            .map_err(|e| VoiceError::Other(format!("VAD processing failed: {}", e)))?;
+        let mut segments = Vec::new();
+        let mut in_speech = false;
+        let mut speech_start = 0usize;
 
-        // Convert to our internal format
-        let result = segments.into_iter()
-            .map(|WhisperVadSegment { start, end }| VadSegment {
-                start_ms: (start * 10.0) as u64, // Convert from centiseconds to milliseconds
-                end_ms: (end * 10.0) as u64,
-            })
-            .collect();
+        let samples_per_ms = self.sample_rate as usize / 1000;
 
-        Ok(result)
+        for (i, window) in audio_data.chunks(self.window_size).enumerate() {
+            let energy = window.iter().map(|&x| x * x).sum::<f32>() / window.len() as f32;
+            let energy_sqrt = energy.sqrt();
+
+            if energy_sqrt > self.threshold {
+                if !in_speech {
+                    // Speech starts
+                    in_speech = true;
+                    speech_start = i * self.window_size;
+                }
+            } else {
+                if in_speech {
+                    // Speech ends
+                    in_speech = false;
+                    let speech_end = i * self.window_size;
+
+                    // Only add segment if it's long enough (> 100ms)
+                    let duration_ms = (speech_end - speech_start) / samples_per_ms;
+                    if duration_ms > 100 {
+                        segments.push(VadSegment {
+                            start_ms: (speech_start / samples_per_ms) as u64,
+                            end_ms: (speech_end / samples_per_ms) as u64,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Handle case where audio ends while still in speech
+        if in_speech {
+            let speech_end = audio_data.len();
+            let duration_ms = (speech_end - speech_start) / samples_per_ms;
+            if duration_ms > 100 {
+                segments.push(VadSegment {
+                    start_ms: (speech_start / samples_per_ms) as u64,
+                    end_ms: (speech_end / samples_per_ms) as u64,
+                });
+            }
+        }
+
+        Ok(segments)
     }
 
     /// Extract only the speech portions from audio

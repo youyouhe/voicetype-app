@@ -5,7 +5,7 @@ use tauri::State;
 use std::sync::{Arc, Mutex};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 
-// pub mod gpu_backend;  // Temporarily disabled for Windows migration
+pub mod gpu_backend;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioDevice {

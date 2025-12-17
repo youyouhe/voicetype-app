@@ -2,6 +2,7 @@ use rdev::{listen, EventType, Key};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::process::Command;
+use std::io::Write;
 use crate::voice_assistant::{KeyboardManagerTrait, AsrProcessor, TranslateProcessor, InputState, VoiceError};
 use crate::voice_assistant::hotkey_parser::ParsedHotkey;
 use std::collections::HashSet;
@@ -571,7 +572,7 @@ impl KeyboardManagerTrait for KeyboardManager {
     }
 }
 
-fn simulate_typing(text: &str, _delays: &TypingDelays) {
+fn simulate_typing(text: &str, delays: &TypingDelays) {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
