@@ -49,11 +49,11 @@ use commands::{
 // Import global whisper manager commands
 use voice_assistant::global_whisper::{get_whisper_manager_status, reload_whisper_processor, clear_whisper_processor};
 
-// Import GPU backend commands
-use commands::gpu_backend::{
-    get_gpu_backend_status, set_preferred_gpu_backend, redetect_gpu_backends,
-    get_backend_details, test_backend_performance
-};
+// Import GPU backend commands - TEMPORARILY DISABLED
+// use commands::gpu_backend::{
+//     get_gpu_backend_status, set_preferred_gpu_backend, redetect_gpu_backends,
+//     get_backend_details, test_backend_performance
+// };
 
 use std::sync::{Arc, Mutex};
 use commands::DatabaseState;
@@ -213,12 +213,12 @@ pub fn run() {
             get_whisper_manager_status,
             reload_whisper_processor,
             clear_whisper_processor,
-            // GPU backend management commands
-            get_gpu_backend_status,
-            set_preferred_gpu_backend,
-            redetect_gpu_backends,
-            get_backend_details,
-            test_backend_performance
+            // GPU backend management commands - TEMPORARILY DISABLED
+            // get_gpu_backend_status,
+            // set_preferred_gpu_backend,
+            // redetect_gpu_backends,
+            // get_backend_details,
+            // test_backend_performance
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
