@@ -69,13 +69,65 @@ impl WhisperRSProcessor {
             )));
         }
 
+        // 设置GPU后端参数
+        println!("🔧 Initializing Whisper with backend: {:?}", config.backend);
+
+        let params = WhisperContextParameters::default();
+
+        // 根据配置的后端设置参数
+        match config.backend {
+            WhisperBackend::CUDA => {
+                println!("🚀 Initializing CUDA backend for GPU acceleration");
+
+                // 设置CUDA设备ID（如果指定）
+                if let Some(device_id) = config.gpu_device_id {
+                    // whisper-rs通过环境变量设置CUDA设备
+                    std::env::set_var("CUDA_VISIBLE_DEVICES", device_id.to_string());
+                    println!("📱 Using CUDA device ID: {}", device_id);
+                }
+
+                // 注意：当前版本使用CPU后端，CUDA支持需要重新编译
+                println!("⚠️ CUDA backend requested but running in CPU mode");
+                println!("💡 To enable CUDA, recompile with: cargo build --features cuda");
+            }
+            WhisperBackend::Vulkan => {
+                println!("⚠️ Vulkan backend requested but running in CPU mode");
+                println!("💡 To enable Vulkan, recompile with: cargo build --features vulkan");
+            }
+            WhisperBackend::Metal => {
+                println!("⚠️ Metal backend requested but running in CPU mode");
+                println!("💡 To enable Metal, recompile with: cargo build --features metal");
+            }
+            WhisperBackend::OpenCL => {
+                println!("⚠️ OpenCL backend requested but running in CPU mode");
+                println!("💡 OpenCL support not available in current build");
+            }
+            WhisperBackend::CPU => {
+                println!("💻 Using CPU backend");
+            }
+        }
+
         // Create whisper context
         let ctx = WhisperContext::new_with_params(
             &config.model_path,
-            WhisperContextParameters::default(),
+            params,
         ).map_err(|e| {
             VoiceError::Other(format!("Failed to load whisper model: {}", e))
         })?;
+
+        // 验证实际使用的后端
+        println!("✅ Whisper context created successfully");
+
+        // 如果GPU后端初始化失败但请求了GPU，提供fallback建议
+        if config.use_gpu_if_available && config.backend != WhisperBackend::CPU {
+            println!("⚠️ Requested GPU backend but currently using CPU backend");
+            println!("💡 To enable GPU acceleration:");
+            println!("   1. Install NVIDIA GPU drivers");
+            println!("   2. Install CUDA Toolkit (for CUDA support)");
+            println!("   3. Recompile with GPU features:");
+            println!("      cargo build --release --features cuda");
+            println!("   4. Check CUDA installation guide");
+        }
 
         // Initialize VAD functionality
         let enable_basic_vad = if config.enable_vad {

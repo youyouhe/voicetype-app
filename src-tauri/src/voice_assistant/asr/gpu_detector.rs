@@ -69,31 +69,78 @@ impl GpuDetector {
         println!("🎯 GPU backend detection completed. Found {} total backends.", self.available_backends.len());
     }
     
-    /// 检测CUDA支持
+    /// 检测CUDA支持 - 增强版本，包含运行时检查
     fn detect_cuda(&self) -> bool {
-        // Simplified CUDA detection for Windows - avoid hanging on external commands
         if crate::utils::platform::is_windows() {
-            // Only check file paths on Windows to avoid command hanging
-            let cuda_paths = vec![
-                "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA",
-                "C:\\Program Files (x86)\\NVIDIA GPU Computing Toolkit\\CUDA",
-                "C:\\CUDA",
-            ];
+            // Windows CUDA检测
 
-            for path in &cuda_paths {
-                if std::path::Path::new(path).exists() {
-                    println!("🎯 CUDA installation found at: {}", path);
+            // 1. 检查NVIDIA驱动
+            if std::path::Path::new("C:\\Windows\\System32\\nvidia-smi.exe").exists() {
+                println!("🚀 NVIDIA driver detected");
+
+                // 尝试获取GPU信息
+                match std::process::Command::new("C:\\Windows\\System32\\nvidia-smi.exe")
+                    .args(&["--query-gpu=name,driver_version,memory.total", "--format=csv,noheader,nounits"])
+                    .output()
+                    .ok() {
+                    Some(output) if output.status.success() => {
+                        let gpu_info = String::from_utf8_lossy(&output.stdout);
+                        println!("💾 NVIDIA GPU Info:\n{}", gpu_info);
+
+                        // 检查是否有足够的显存（建议至少4GB）
+                        if gpu_info.lines().any(|line| {
+                            line.split(',').nth(2).unwrap_or("0").trim().parse::<u32>().unwrap_or(0) >= 4096
+                        }) {
+                            println!("✅ Sufficient GPU memory detected for CUDA acceleration");
+                        } else {
+                            println!("⚠️ Limited GPU memory - CUDA may still work but could be slow");
+                        }
+                    }
+                    _ => {
+                        println!("⚠️ Could not query GPU details");
+                    }
+                }
+
+                // 2. 检查CUDA Toolkit安装
+                let cuda_paths = vec![
+                    "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.0",
+                    "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.8",
+                    "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v11.7",
+                    "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA",
+                    "C:\\Program Files (x86)\\NVIDIA GPU Computing Toolkit\\CUDA",
+                    "C:\\CUDA",
+                ];
+
+                for path in &cuda_paths {
+                    if std::path::Path::new(path).exists() {
+                        println!("🎯 CUDA Toolkit found at: {}", path);
+
+                        // 检查关键库文件
+                        let cudart_path = format!("{}\\bin\\cudart64_*.dll", path);
+                        if glob::glob(&cudart_path).unwrap().next().is_some() {
+                            println!("✅ CUDA runtime libraries found");
+                            return true;
+                        } else {
+                            println!("⚠️ CUDA Toolkit found but runtime libraries missing");
+                        }
+                    }
+                }
+
+                // 3. 检查系统PATH中的CUDA运行时
+                if self.check_cuda_runtime_in_path() {
                     return true;
                 }
-            }
 
-            // Quick check for NVIDIA driver files
-            if std::path::Path::new("C:\\Windows\\System32\\nvidia-smi.exe").exists() {
-                println!("🚀 NVIDIA GPU detected via nvidia-smi.exe presence");
-                return true;
+                println!("🔧 CUDA driver found but Toolkit installation not detected");
+                println!("💡 Install NVIDIA CUDA Toolkit for better performance");
+                println!("   Download: https://developer.nvidia.com/cuda-downloads");
+                return true; // 有驱动就可以尝试使用CUDA
+            } else {
+                println!("❌ NVIDIA driver not found");
+                return false;
             }
         } else {
-            // On Linux/macOS, try nvidia-smi with timeout
+            // Linux/macOS CUDA检测
             match std::process::Command::new("nvidia-smi")
                 .output()
                 .ok() {
@@ -101,22 +148,73 @@ impl GpuDetector {
                     let output_str = String::from_utf8_lossy(&output.stdout);
                     if output_str.contains("NVIDIA-SMI") && output_str.contains("Driver Version") {
                         println!("🚀 NVIDIA GPU detected via nvidia-smi");
-                        return true;
+
+                        // 提取GPU信息
+                        if let Some(gpu_line) = output_str.lines().find(|line| line.contains("CUDA Version")) {
+                            println!("📊 GPU Driver: {}", gpu_line.trim());
+                        }
+
+                        // 检查CUDA库
+                        let cuda_paths = vec!["/usr/local/cuda", "/opt/cuda", "/usr/cuda"];
+                        for path in &cuda_paths {
+                            if std::path::Path::new(path).exists() {
+                                println!("🎯 CUDA installation found at: {}", path);
+                                return true;
+                            }
+                        }
+
+                        // 检查系统库
+                        if self.check_cuda_libraries() {
+                            return true;
+                        }
+
+                        return true; // 有驱动就返回true
                     }
                 }
                 _ => {}
             }
+        }
 
-            // Check for CUDA paths
-            let cuda_paths = vec!["/usr/local/cuda", "/opt/cuda", "/usr/cuda"];
-            for path in &cuda_paths {
-                if std::path::Path::new(path).exists() {
-                    println!("🎯 CUDA installation found at: {}", path);
-                    return true;
+        false
+    }
+
+    /// 检查PATH中的CUDA运行时库
+    fn check_cuda_runtime_in_path(&self) -> bool {
+        if let Ok(path_env) = std::env::var("PATH") {
+            for path_dir in path_env.split(';') {
+                let cudart_candidates = vec![
+                    format!("{}\\cudart64_120.dll", path_dir),
+                    format!("{}\\cudart64_118.dll", path_dir),
+                    format!("{}\\cudart64_117.dll", path_dir),
+                    format!("{}\\cudart64_110.dll", path_dir),
+                ];
+
+                for cudart_path in cudart_candidates {
+                    if std::path::Path::new(&cudart_path).exists() {
+                        println!("✅ CUDA runtime found in PATH: {}", cudart_path);
+                        return true;
+                    }
                 }
             }
         }
+        false
+    }
 
+    /// 检查Linux系统CUDA库
+    fn check_cuda_libraries(&self) -> bool {
+        let libcuda_paths = vec![
+            "/usr/lib/x86_64-linux-gnu/libcudart.so.12",
+            "/usr/lib/x86_64-linux-gnu/libcudart.so.11",
+            "/usr/lib/libcudart.so.12",
+            "/usr/lib/libcudart.so.11",
+        ];
+
+        for lib_path in &libcuda_paths {
+            if std::path::Path::new(lib_path).exists() {
+                println!("✅ CUDA library found: {}", lib_path);
+                return true;
+            }
+        }
         false
     }
     
@@ -270,7 +368,7 @@ mod tests {
     fn test_gpu_detector_creation() {
         let detector = GpuDetector::new();
         assert!(!detector.get_available_backends().is_empty());
-        assert!(detector.is_backend_available(&WhisperBackend::Cpu));
+        assert!(detector.is_backend_available(&WhisperBackend::CPU));
     }
     
     #[test]
