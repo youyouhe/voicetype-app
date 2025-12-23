@@ -104,7 +104,16 @@ impl EnhancedWhisperProcessor {
         params.set_print_realtime(false);
 
         // Performance settings
-        params.set_temperature(0.0f32);
+        // Translation requires higher temperature to avoid repetition loops
+        // Transcription uses 0.0 for accuracy, translation uses 0.2 for better results
+        let temperature = if matches!(mode, Mode::Translations) {
+            0.2f32  // Higher temperature for translation to prevent repetition
+        } else {
+            0.0f32  // Greedy decoding for transcription accuracy
+        };
+        params.set_temperature(temperature);
+        println!("🌡️ Temperature set to: {} (mode: {:?})", temperature, mode);
+
         params.set_max_initial_ts(1_000_000.0);
 
         // Enable prompt caching for better performance on subsequent runs
