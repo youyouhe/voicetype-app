@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Flash-Input",
+  "productName": "VoiceType",
   "version": "0.1.0",
-  "identifier": "com.martin.flash-input",
+  "identifier": "com.voicetype.app",
   "build": {
     "beforeDevCommand": "cd src && npm run dev",
     "devUrl": "http://localhost:1420",
@@ -14,9 +14,10 @@
     "windows": [
       {
         "label": "main",
-        "title": "Flash-Input",
+        "title": "VoiceType",
         "width": 800,
         "height": 600,
+        "resizable": false,
         "devtools": true
       }
     ],
@@ -26,7 +27,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": [],
+    "targets": "all",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -34,9 +35,17 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "publisher": "VoiceType Team",
+    "copyright": "Copyright © 2025 VoiceType Team",
+    "category": "Productivity",
+    "shortDescription": "AI Voice Assistant with local Whisper support",
+    "longDescription": "VoiceType is an AI-powered voice assistant that runs locally on your machine, featuring speech recognition through Whisper and intelligent text input capabilities.",
     "windows": {
-      "nsis": {
-        "installerIcon": "icons/icon.ico"
+      "wix": {
+        "language": "en-US"
+      },
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
       }
     }
   },

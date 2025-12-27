@@ -3,7 +3,7 @@ use tokio::sync::RwLock;
 use serde::{Serialize, Deserialize};
 use std::sync::OnceLock;
 
-use crate::voice_assistant::asr::whisper_rs::{WhisperRSProcessor, WhisperRSConfig};
+use crate::voice_assistant::asr::whisper_rs::{WhisperRSProcessor, WhisperRSConfig, OutputFormat};
 use crate::voice_assistant::traits::VoiceError;
 
 /// 全局WhisperRS实例管理器
@@ -46,10 +46,7 @@ impl GlobalWhisperManager {
         println!("🔧 Initializing new WhisperRS processor for model: {}", model_path);
         self.init_in_progress = true;
 
-        // Auto-detect optimal GPU backend
-        let gpu_detector = crate::voice_assistant::asr::gpu_detector::GpuDetector::new();
-        let optimal_backend = gpu_detector.get_preferred_backend();
-
+        // 🔥 简化：直接使用CPU后端，避免GPU detector死锁
         let config = WhisperRSConfig {
             model_path: model_path.to_string(),
             language: None, // Auto-detect
@@ -59,14 +56,10 @@ impl GlobalWhisperManager {
                 .unwrap_or_else(|_| "false".to_string())
                 .parse::<bool>()
                 .unwrap_or(false),
-            backend: optimal_backend.clone(),
-            use_gpu_if_available: std::env::var("WHISPER_USE_GPU")
-                .unwrap_or_else(|_| "true".to_string())
-                .parse::<bool>()
-                .unwrap_or(true),
-            gpu_device_id: std::env::var("WHISPER_GPU_DEVICE_ID")
-                .ok()
-                .and_then(|id| id.parse::<u32>().ok()),
+            backend: crate::voice_assistant::asr::whisper_rs::WhisperBackend::CPU,
+            use_gpu_if_available: false,
+            gpu_device_id: None,
+            output_format: OutputFormat::Text, // 🔥 默认使用纯文本格式
         };
 
         match WhisperRSProcessor::new(config) {

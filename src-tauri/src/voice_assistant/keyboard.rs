@@ -48,17 +48,29 @@ impl KeyboardManager {
     /// 🔥 更新处理器引用 - 用于配置刷新
     pub fn update_processors(
         &mut self,
-        new_asr_processor: Arc<dyn AsrProcessor + Send + Sync>,
+        new_asr_processor: Option<Arc<dyn AsrProcessor + Send + Sync>>,
         new_translate_processor: Option<Arc<dyn TranslateProcessor + Send + Sync>>,
     ) -> Result<(), VoiceError> {
         println!("🔄 Updating KeyboardManager processors...");
-        
+
         // 更新处理器引用
-        self.asr_processor = new_asr_processor;
+        if let Some(asr) = new_asr_processor {
+            self.asr_processor = asr;
+        }
         self.translate_processor = new_translate_processor;
-        
+
         println!("✅ KeyboardManager processors updated successfully");
         Ok(())
+    }
+
+    /// 🔥 清除处理器引用 - 用于停止服务时释放模型内存
+    pub fn clear_processors(&mut self) {
+        println!("🗑️ KeyboardManager: Clearing processor references to free memory...");
+        // 将 ASR 处理器替换为一个空的默认实现
+        // 这样可以释放原有的 Arc 引用
+        self.asr_processor = Arc::new(DefaultAsrProcessor);
+        self.translate_processor = None;
+        println!("✅ KeyboardManager: Processor references cleared");
     }
 
     /// 设置热键配置
@@ -115,6 +127,13 @@ impl KeyboardManager {
             if let Err(e) = listen(move |event| {
                 match event.event_type {
                     EventType::KeyPress(key) => {
+                        // 🔥 关键优化：在非Idle状态下，提前返回忽略所有按键
+                        let current_state = *state.lock().unwrap();
+                        if current_state != InputState::Idle {
+                            // 不打印日志，完全静默忽略所有按键事件
+                            return;
+                        }
+
                         let mut keys = pressed_keys.lock().unwrap();
                         // 只有当按键是新的时候才记录日志和插入
                         let is_new_key = !keys.contains(&key);
@@ -136,7 +155,8 @@ impl KeyboardManager {
                         
                         // 检查转录热键
                         if let Some(ref transcribe_hotkey) = *transcribe_hotkey_guard {
-                            if transcribe_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started {
+                            // 🔥 只在Idle状态下响应热键，避免enigo模拟输入触发死循环
+                            if transcribe_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started && current_state == InputState::Idle {
                                 // 检查按键持续时间（防误触）
                                 let current_time = Instant::now();
                                 let should_trigger = if let Some(press_time) = hotkey_press_time {
@@ -173,7 +193,8 @@ impl KeyboardManager {
                         
                         // 检查翻译热键
                         if let Some(ref translate_hotkey) = *translate_hotkey_guard {
-                            if translate_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started {
+                            // 🔥 只在Idle状态下响应热键，避免enigo模拟输入触发死循环
+                            if translate_hotkey.matches(&*keys) && current_state.can_start_recording() && !recording_started && current_state == InputState::Idle {
                                 // 检查按键持续时间（防误触）
                                 let current_time = Instant::now();
                                 let should_trigger = if let Some(press_time) = hotkey_press_time {
@@ -210,17 +231,23 @@ impl KeyboardManager {
                     }
                     
                     EventType::KeyRelease(key) => {
+                        // 🔥 优化：在非录音状态下，提前返回忽略所有按键释放事件
+                        let current_state = *state.lock().unwrap();
+                        if !matches!(current_state, InputState::Recording | InputState::RecordingTranslate | InputState::Idle) {
+                            // 在Processing/Translating等状态下，完全忽略按键释放
+                            return;
+                        }
+
                         let mut keys = pressed_keys.lock().unwrap();
                         println!("🔓 KeyRelease detected: {:?}", key);
                         keys.remove(&key);
                         println!("🔑 Remaining keys after release: {:?}", keys);
-                        
+
                         // 重置按键时间戳（当所有按键都释放时）
                         if keys.is_empty() {
                             hotkey_press_time = None;
-                            
+
                             // 检查是否在录音状态，如果是，则转换到处理状态
-                            let current_state = *state.lock().unwrap();
                             match current_state {
                                 InputState::Recording => {
                                     println!("🎤 Transcribe hotkey released - switching to Processing state...");
@@ -237,7 +264,7 @@ impl KeyboardManager {
                                 _ => {}
                             }
                         }
-                        
+
                         // For direct processing, state reset happens in the processing handlers
                         // We don't need to reset state here anymore
                     }
@@ -361,25 +388,71 @@ impl KeyboardManager {
                         crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Idle);
                         }
                         InputState::Translating => {
-                            // Skip audio recording and use mock translation text directly
+                            // 🔥 使用whisper.cpp内置的翻译功能
                             println!("🔄 Entering Translating state...");
-                            println!("📝 Using mock translation text for testing (mic is broken)");
+                            println!("🌐 Using whisper.cpp built-in translation (speech → English text)...");
 
-                            let state_clone = state.clone();
-                            let temp_len_clone = temp_text_length.clone();
-                            let clipboard_clone = original_clipboard.clone();
+                            let final_result = if let Some(ref mut rec) = recorder {
+                                println!("🛑 Stopping recording for translation...");
 
-                            // Mock translation text with Chinese content
-                            let mock_translated = "这是热键翻译测试文字，模拟语音翻译结果。This is a mock translation test from voice input. 🌐".to_string();
+                                // Get audio data and sample rate BEFORE stopping recording
+                                let audio_data = rec.get_audio_data();
+                                let sample_rate = rec.get_sample_rate();
+                                println!("📊 Got audio data: {} samples", audio_data.len());
 
-                            println!("⌨️ Typing translated text: \"{}\"", mock_translated);
-                            Self::type_text_internal(&state_clone, &temp_len_clone, &clipboard_clone, &mock_translated, None, &typing_delays_for_callback.lock().unwrap());
-                            println!("✅ Translation text typing completed");
-
-                            // Stop any recording if active
-                            if let Some(ref mut rec) = recorder {
+                                // Stop recording
                                 let _ = rec.stop_recording();
-                                recorder = None;
+
+                                // Convert to WAV bytes (after we're done with rec)
+                                let wav_bytes_result = Self::convert_to_wav_bytes(&audio_data, sample_rate);
+                                let _ = rec; // Explicitly drop the borrow
+                                recorder = None; // Now we can assign
+
+                                match wav_bytes_result {
+                                    Ok(wav_bytes) => {
+                                        let audio_cursor = std::io::Cursor::new(wav_bytes);
+                                        println!("🎵 Converted audio to WAV format");
+
+                                        // 🔥 关键：使用 Mode::Translations 让whisper直接翻译成英文
+                                        let start = std::time::Instant::now();
+                                        let translation = _asr_processor.process_audio(
+                                            audio_cursor,
+                                            crate::voice_assistant::Mode::Translations,  // 🔥 翻译模式
+                                            ""
+                                        );
+                                        let processing_time = start.elapsed().as_millis() as i64;
+
+                                        match translation {
+                                            Ok(translated_text) => {
+                                                println!("✅ Whisper translation result: \"{}\"", translated_text);
+                                                println!("⏱️ Processing time: {}ms", processing_time);
+                                                Some(translated_text)
+                                            }
+                                            Err(e) => {
+                                                println!("❌ Whisper translation error: {}", e);
+                                                Some(format!("❌ Translation failed: {}", e))
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("❌ Failed to convert audio to WAV: {}", e);
+                                        Some(format!("❌ Audio conversion failed: {}", e))
+                                    }
+                                }
+                            } else {
+                                println!("⚠️ No recorder found, nothing to translate");
+                                Some("❌ No recording found".to_string())
+                            };
+
+                            // Type the result
+                            if let Some(result_text) = final_result {
+                                let state_clone = state.clone();
+                                let temp_len_clone = temp_text_length.clone();
+                                let clipboard_clone = original_clipboard.clone();
+
+                                println!("⌨️ Typing translation result: \"{}\"", result_text);
+                                Self::type_text_internal(&state_clone, &temp_len_clone, &clipboard_clone, &result_text, None, &typing_delays_for_callback.lock().unwrap());
+                                println!("✅ Translation result typing completed");
                             }
 
                             // IMPORTANT: Reset state and flags immediately after processing
@@ -444,43 +517,34 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
 
     fn type_text_internal(
         state: &Arc<Mutex<InputState>>,
-        temp_text_length: &Arc<Mutex<usize>>,
+        _temp_text_length: &Arc<Mutex<usize>>,
         original_clipboard: &Arc<Mutex<Option<String>>>,
         text: &str,
         error: Option<&str>,
-        delays: &TypingDelays,
+        _delays: &TypingDelays,
     ) {
-        // 删除之前的临时文本
-        let len = *temp_text_length.lock().unwrap();
-        for _ in 0..len {
-            simulate_backspace();
-        }
-        *temp_text_length.lock().unwrap() = 0;
+        // 🔥 禁用temp_text_length机制，避免模拟退格触发rdev死循环
+        // 剪贴板输入已经可靠，不需要删除临时文本
+        println!("⌨️ Skipping temp_text_length cleanup (using clipboard input)");
 
         if let Some(err_msg) = error {
             // 显示错误消息
-            simulate_typing(&format!("❌ {}", err_msg), delays);
-            *temp_text_length.lock().unwrap() = 2 + err_msg.len();
+            simulate_typing(&format!("❌ {}", err_msg), _delays);
 
             // 2秒后清除错误消息 - use std sleep instead of tokio
             let state_clone = state.clone();
-            let temp_len_clone = temp_text_length.clone();
             std::thread::spawn(move || {
                 std::thread::sleep(Duration::from_secs(2));
                 if *state_clone.lock().unwrap() == InputState::Error {
                     *state_clone.lock().unwrap() = InputState::Idle;
-                    let len = *temp_len_clone.lock().unwrap();
-                    for _ in 0..len {
-                        simulate_backspace();
-                    }
-                    *temp_len_clone.lock().unwrap() = 0;
+                    // 🔥 不再删除临时文本，避免死循环
                 }
             });
 
             *state.lock().unwrap() = InputState::Error;
         } else if !text.is_empty() {
             // 输入最终文本
-            simulate_typing(text, delays);
+            simulate_typing(text, _delays);
 
             // 恢复剪贴板
             let mut clipboard = original_clipboard.lock().unwrap();
@@ -498,12 +562,8 @@ fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioR
         self.pressed_keys.lock().unwrap().clear();
         *self.hotkey_start_time.lock().unwrap() = None;
 
-        // 删除临时文本
-        let len = *self.temp_text_length.lock().unwrap();
-        for _ in 0..len {
-            simulate_backspace();
-        }
-        *self.temp_text_length.lock().unwrap() = 0;
+        // 🔥 不再删除临时文本，避免enigo模拟退格触发rdev死循环
+        println!("🔄 State reset (skipping temp_text cleanup)");
 
         // 恢复剪贴板
         let mut clipboard = self.original_clipboard.lock().unwrap();
@@ -590,10 +650,13 @@ fn simulate_typing(text: &str, _delays: &TypingDelays) {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows 实现可以使用 sendinput 或者剪贴板
-        // 为了简化，这里使用剪贴板方式
-        set_clipboard_content(text);
-        simulate_paste();
+        // 🔥 Windows平台：使用逐字符模拟键盘输入
+        println!("⌨️ Using keyboard simulation for character-by-character input...");
+        println!("✅ Text to type: \"{}\"", text);
+
+        type_text_by_keypress(text);
+
+        println!("✅ Keyboard simulation completed");
     }
 
     #[cfg(target_os = "linux")]
@@ -664,6 +727,63 @@ fn simulate_typing(text: &str, _delays: &TypingDelays) {
 
         println!("✅ Clipboard paste completed");
     }
+}
+
+/// Windows: 逐字符模拟键盘输入（支持Unicode）
+#[cfg(target_os = "windows")]
+fn type_text_by_keypress(text: &str) {
+    // 🔥 统一使用 Unicode 输入方式，完全绕过输入法和虚拟键码映射
+    // 这样可以避免 ctfmon.exe 错误和输入法干扰
+    println!("⌨️ Using Unicode input for all characters to bypass IME...");
+    println!("✅ Text to type: \"{}\"", text);
+
+    for ch in text.chars() {
+        type_unicode_char(ch);
+    }
+
+    println!("✅ Unicode input completed");
+}
+
+/// Windows: 输入Unicode字符（支持中文等）
+#[cfg(target_os = "windows")]
+fn type_unicode_char(ch: char) {
+    unsafe {
+        use winapi::um::winuser::{SendInput, INPUT, KEYBDINPUT, INPUT_KEYBOARD, KEYEVENTF_UNICODE, KEYEVENTF_KEYUP};
+        use winapi::shared::minwindef::WORD;
+        use std::mem;
+
+        let code_point = ch as u32;
+
+        // 按下 - Unicode扫描码
+        let mut key_down: INPUT = mem::zeroed();
+        key_down.type_ = INPUT_KEYBOARD;
+        *key_down.u.ki_mut() = KEYBDINPUT {
+            wVk: 0,
+            wScan: code_point as WORD,
+            dwFlags: KEYEVENTF_UNICODE,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        // 释放
+        let mut key_up: INPUT = mem::zeroed();
+        key_up.type_ = INPUT_KEYBOARD;
+        *key_up.u.ki_mut() = KEYBDINPUT {
+            wVk: 0,
+            wScan: code_point as WORD,
+            dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        let mut inputs = [key_down, key_up];
+        let size = mem::size_of::<INPUT>() as i32;
+        let count = inputs.len() as u32;
+
+        SendInput(count, inputs.as_mut_ptr() as *mut INPUT, size);
+        std::thread::sleep(std::time::Duration::from_millis(15));
+    }
+}
 
 // Fallback function: type text directly using xdotool
 #[allow(dead_code)]
@@ -900,8 +1020,8 @@ fn type_text_direct(text: &str, delays: &TypingDelays) -> Result<(), VoiceError>
     println!("🔧 Text input complete");
     return Ok(());
 }
-}
 
+#[allow(dead_code)]
 fn simulate_backspace() {
     #[cfg(target_os = "macos")]
     {
@@ -914,9 +1034,11 @@ fn simulate_backspace() {
 
     #[cfg(target_os = "windows")]
     {
-        // Windows backspace
+        // 🔥 使用PowerShell的SendKeys模拟退格键（不会被rdev捕获）
         use std::process::Command;
         let _ = Command::new("powershell")
+            .arg("-WindowStyle")
+            .arg("Hidden")
             .arg("-Command")
             .arg("$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('{BACKSPACE}')")
             .output();
@@ -931,7 +1053,7 @@ fn simulate_backspace() {
 }
 
 #[allow(dead_code)]
-fn simulate_paste() {
+fn simulate_paste(_text: &str) {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
@@ -943,11 +1065,186 @@ fn simulate_paste() {
 
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
-        let _ = Command::new("powershell")
-            .arg("-Command")
-            .arg("$wshell = New-Object -ComObject wscript.shell; $wshell.SendKeys('^v')")
-            .output();
+        println!("🔧 simulate_paste: Starting Windows paste implementation");
+
+        // Detect if foreground window is a terminal
+        let is_terminal = unsafe {
+            use winapi::um::winuser::{GetForegroundWindow, GetWindowTextW};
+
+            let hwnd = GetForegroundWindow();
+            if hwnd.is_null() {
+                false
+            } else {
+                let mut buffer = [16u16; 512];
+                let len = GetWindowTextW(hwnd, buffer.as_mut_ptr(), 512);
+                if len > 0 {
+                    let title = String::from_utf16_lossy(&buffer[..len as usize]).to_lowercase();
+                    println!("🔧 simulate_paste: Foreground window title: \"{}\"", title);
+                    // Check for common terminal names
+                    title.contains("windows terminal")
+                        || title.contains("powershell")
+                        || title.contains("command prompt")
+                        || title.contains("cmd")
+                        || title.contains("ubuntu")
+                        || title.contains("wsl")
+                        || title.contains("terminal")
+                        || title.contains("console")
+                } else {
+                    false
+                }
+            }
+        };
+
+        if is_terminal {
+            println!("🔧 simulate_paste: Terminal detected, using Ctrl+Shift+V");
+            // Try Ctrl+Shift+V for terminals (Windows Terminal, some modern terminals)
+            unsafe {
+                use winapi::um::winuser::{SendInput, INPUT, KEYBDINPUT, INPUT_KEYBOARD, KEYEVENTF_KEYUP, VK_CONTROL, VK_SHIFT};
+                use std::mem;
+
+                const VK_V: u16 = 0x56;
+
+                // Press Ctrl
+                let mut ctrl_down: INPUT = mem::zeroed();
+                ctrl_down.type_ = INPUT_KEYBOARD;
+                *ctrl_down.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_CONTROL as u16,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Press Shift
+                let mut shift_down: INPUT = mem::zeroed();
+                shift_down.type_ = INPUT_KEYBOARD;
+                *shift_down.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_SHIFT as u16,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Press V
+                let mut v_down: INPUT = mem::zeroed();
+                v_down.type_ = INPUT_KEYBOARD;
+                *v_down.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_V,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Release V
+                let mut v_up: INPUT = mem::zeroed();
+                v_up.type_ = INPUT_KEYBOARD;
+                *v_up.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_V,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Release Shift
+                let mut shift_up: INPUT = mem::zeroed();
+                shift_up.type_ = INPUT_KEYBOARD;
+                *shift_up.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_SHIFT as u16,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Release Ctrl
+                let mut ctrl_up: INPUT = mem::zeroed();
+                ctrl_up.type_ = INPUT_KEYBOARD;
+                *ctrl_up.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_CONTROL as u16,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                let mut inputs = [ctrl_down, shift_down, v_down, v_up, shift_up, ctrl_up];
+                let size = mem::size_of::<INPUT>() as i32;
+                let count = inputs.len() as u32;
+
+                println!("🔧 simulate_paste: Sending Ctrl+Shift+V ({}) inputs", count);
+                let result = SendInput(count, inputs.as_mut_ptr(), size);
+                println!("🔧 simulate_paste: SendInput returned {} (expected {})", result, count);
+            }
+        } else {
+            println!("🔧 simulate_paste: Non-terminal detected, using Ctrl+V");
+            // Standard Ctrl+V for GUI applications
+            unsafe {
+                use winapi::um::winuser::{SendInput, INPUT, KEYBDINPUT, INPUT_KEYBOARD, KEYEVENTF_KEYUP, VK_CONTROL};
+                use std::mem;
+
+                const VK_V: u16 = 0x56;
+
+                // Press Ctrl
+                let mut ctrl_down: INPUT = mem::zeroed();
+                ctrl_down.type_ = INPUT_KEYBOARD;
+                *ctrl_down.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_CONTROL as u16,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Press V
+                let mut v_down: INPUT = mem::zeroed();
+                v_down.type_ = INPUT_KEYBOARD;
+                *v_down.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_V,
+                    wScan: 0,
+                    dwFlags: 0,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Release V
+                let mut v_up: INPUT = mem::zeroed();
+                v_up.type_ = INPUT_KEYBOARD;
+                *v_up.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_V,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                // Release Ctrl
+                let mut ctrl_up: INPUT = mem::zeroed();
+                ctrl_up.type_ = INPUT_KEYBOARD;
+                *ctrl_up.u.ki_mut() = KEYBDINPUT {
+                    wVk: VK_CONTROL as u16,
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                let mut inputs = [ctrl_down, v_down, v_up, ctrl_up];
+                let size = mem::size_of::<INPUT>() as i32;
+                let count = inputs.len() as u32;
+
+                println!("🔧 simulate_paste: Sending Ctrl+V ({} inputs)", count);
+                let result = SendInput(count, inputs.as_mut_ptr(), size);
+                println!("🔧 simulate_paste: SendInput returned {} (expected {})", result, count);
+            }
+        }
+
+        // Wait for paste to complete
+        println!("🔧 simulate_paste: Waiting for paste to complete");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        println!("🔧 simulate_paste: Paste operation completed");
     }
 
     #[cfg(target_os = "linux")]
@@ -970,14 +1267,34 @@ fn get_clipboard_content() -> Result<String, VoiceError> {
 
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
-        let output = Command::new("powershell")
-            .arg("-Command")
-            .arg("Get-Clipboard")
-            .output()
-            .map_err(|e| VoiceError::Other(format!("Failed to get clipboard: {}", e)))?;
+        // Use Windows API directly instead of PowerShell
+        unsafe {
+            use winapi::um::winuser::{OpenClipboard, CloseClipboard, GetClipboardData, CF_UNICODETEXT};
+            use winapi::um::winnt::WCHAR;
 
-        Ok(String::from_utf8(output.stdout)?)
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return Err(VoiceError::Other("Failed to open clipboard".to_string()));
+            }
+
+            let clipboard_data = GetClipboardData(CF_UNICODETEXT);
+            if clipboard_data.is_null() {
+                CloseClipboard();
+                return Err(VoiceError::Other("Failed to get clipboard data".to_string()));
+            }
+
+            let text_ptr = clipboard_data as *const WCHAR;
+            let mut len = 0;
+            while *text_ptr.offset(len) != 0 {
+                len += 1;
+            }
+
+            let slice = std::slice::from_raw_parts(text_ptr, len as usize);
+            let text = String::from_utf16(slice)
+                .map_err(|e| VoiceError::Other(format!("Failed to parse clipboard text: {}", e)))?;
+
+            CloseClipboard();
+            Ok(text)
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -1006,11 +1323,44 @@ fn set_clipboard_content(text: &str) {
 
     #[cfg(target_os = "windows")]
     {
-        use std::process::Command;
-        let _ = Command::new("powershell")
-            .arg("-Command")
-            .arg(&format!("Set-Clipboard \"{}\"", text))
-            .output();
+        // Use Windows API directly instead of PowerShell
+        unsafe {
+            use winapi::um::winuser::{OpenClipboard, CloseClipboard, EmptyClipboard, SetClipboardData, CF_UNICODETEXT};
+            use winapi::um::winbase::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+            use winapi::um::winnt::WCHAR;
+
+            if OpenClipboard(std::ptr::null_mut()) == 0 {
+                return;
+            }
+
+            EmptyClipboard();
+
+            // Convert string to UTF-16
+            let utf16_text: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+            let byte_len = utf16_text.len() * std::mem::size_of::<WCHAR>();
+
+            // Allocate global memory
+            let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
+            if handle.is_null() {
+                CloseClipboard();
+                return;
+            }
+
+            // Lock and copy data
+            let ptr = GlobalLock(handle);
+            if ptr.is_null() {
+                GlobalUnlock(handle);
+                CloseClipboard();
+                return;
+            }
+
+            std::ptr::copy_nonoverlapping(utf16_text.as_ptr(), ptr as *mut WCHAR, utf16_text.len());
+            GlobalUnlock(handle);
+
+            // Set clipboard data
+            SetClipboardData(CF_UNICODETEXT, handle);
+            CloseClipboard();
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -1079,9 +1429,31 @@ fn set_clipboard_content(text: &str) {
             eprintln!("❌ Warning: No clipboard utility found (xclip, xsel, wl-copy)");
             eprintln!("💡 Install one of: sudo apt install xclip");
             eprintln!("📝 Falling back to echo command for basic output");
-            
+
             // As a last resort, just print to stdout so user can see it
             println!("📋 Text to copy manually: {}", text);
         }
+    }
+}
+
+/// 占位符 ASR 处理器，用于释放实际处理器时使用
+struct DefaultAsrProcessor;
+
+// 实现Send和Sync，因为ASR处理器需要在线程间共享
+unsafe impl Send for DefaultAsrProcessor {}
+unsafe impl Sync for DefaultAsrProcessor {}
+
+impl AsrProcessor for DefaultAsrProcessor {
+    fn process_audio(
+        &self,
+        _audio_buffer: std::io::Cursor<Vec<u8>>,
+        _mode: crate::voice_assistant::Mode,
+        _prompt: &str,
+    ) -> Result<String, VoiceError> {
+        Err(VoiceError::Other("ASR processor not available".to_string()))
+    }
+
+    fn get_processor_type(&self) -> Option<&str> {
+        Some("default-placeholder")
     }
 }

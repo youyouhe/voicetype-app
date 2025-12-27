@@ -1,10 +1,12 @@
-import React, { memo } from 'react';
+import React, { memo, useState, useEffect } from 'react';
 import { FileText, Languages, Clock, Save, Trash2 } from 'lucide-react';
-import { AppStatus, HistoryItem } from '../../types';
+import { AppStatus, HistoryItem, HotkeyConfig } from '../../types';
 import { StatusCircle } from '../MainView/StatusCircle';
 import { LiveData } from '../MainView/LiveData';
 import { VoiceAssistantPanel } from '../MainView/VoiceAssistantPanel';
 import { Button } from '../ui/Button';
+import { TauriService } from '../../services/tauriService';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface DashboardViewProps {
   appStatus: AppStatus;
@@ -27,6 +29,26 @@ export const DashboardView = memo<DashboardViewProps>(({
   stopVoiceAssistant,
   isVoiceAssistantRunning
 }) => {
+  const { t } = useLanguage();
+  const [hotkeyConfig, setHotkeyConfig] = useState<HotkeyConfig | null>(null);
+
+  // Fetch hotkey config on mount
+  useEffect(() => {
+    const fetchHotkeyConfig = async () => {
+      try {
+        const config = await TauriService.getHotkeyConfig();
+        console.log('📥 DashboardView - Loaded hotkey config:', config);
+        setHotkeyConfig(config);
+      } catch (error) {
+        console.error('❌ DashboardView - Failed to load hotkey config:', error);
+      }
+    };
+
+    fetchHotkeyConfig();
+  }, []);
+
+  const transcribeKey = hotkeyConfig?.transcribe_key || 'F4';
+  const translateKey = hotkeyConfig?.translate_key || 'Shift+F4';
   return (
     <div className="max-w-6xl mx-auto px-4 py-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
       {/* Voice Assistant Panel */}
@@ -47,17 +69,17 @@ export const DashboardView = memo<DashboardViewProps>(({
 
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold text-gray-900 dark:text-dark-text mb-2 transition-all">
-              {!isVoiceAssistantRunning ? 'Voice Assistant Offline' :
-               appStatus === AppStatus.Idle ? 'Ready to Listen' :
-               appStatus === AppStatus.Recording ? 'Listening...' :
-               appStatus === AppStatus.Processing ? 'Processing Audio...' : 'Translating...'}
+              {!isVoiceAssistantRunning ? t.voiceAssistantOffline :
+               appStatus === AppStatus.Idle ? t.readyToListen :
+               appStatus === AppStatus.Recording ? t.listening :
+               appStatus === AppStatus.Processing ? t.processing : t.translating}
             </h2>
             <p className="text-gray-500 dark:text-dark-muted max-w-md mx-auto">
               {!isVoiceAssistantRunning
-                ? 'Please start Voice Assistant first to use transcription and translation features.'
+                ? t.voiceAssistantOfflineDesc
                 : appStatus === AppStatus.Idle
-                ? 'Press F4 (transcribe) or Shift+F4 (translate) hotkeys to start capturing audio.'
-                : 'Speak clearly into your microphone.'}
+                ? t.readyToListenDesc(transcribeKey, translateKey)
+                : t.speakClearly}
             </p>
           </div>
 
@@ -70,26 +92,26 @@ export const DashboardView = memo<DashboardViewProps>(({
               className="w-full sm:w-48 relative"
               title={
                 !isVoiceAssistantRunning
-                  ? "Start Voice Assistant first to enable transcription"
+                  ? t.startVoiceAssistantFirst
                   : appStatus === AppStatus.Idle
-                  ? "Press F4 hotkey to start transcribing"
-                  : "Voice Assistant is busy - please wait"
+                  ? t.pressHotkeyToStart(transcribeKey)
+                  : t.voiceAssistantBusy
               }
             >
               {!isVoiceAssistantRunning ? (
                 <>
-                  Start Voice Assistant
+                  {t.startVoiceAssistant}
                   <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">↑</span>
                 </>
               ) : appStatus === AppStatus.Idle ? (
                 <>
-                  Transcribe
-                  <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">F4</span>
+                  {t.transcribe}
+                  <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">{transcribeKey}</span>
                 </>
               ) : (
                 <>
-                  Use Hotkey F4
-                  <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">Active</span>
+                  {t.transcribe} {transcribeKey}
+                  <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">{t.active}</span>
                 </>
               )}
             </Button>
@@ -102,14 +124,14 @@ export const DashboardView = memo<DashboardViewProps>(({
               className="w-full sm:w-48"
               title={
                 !isVoiceAssistantRunning
-                  ? "Start Voice Assistant first to enable translation"
+                  ? t.startVoiceAssistantFirst
                   : appStatus === AppStatus.Idle
-                  ? "Press Shift+F4 hotkey to start translating"
-                  : "Voice Assistant is busy - please wait"
+                  ? t.pressHotkeyToStart(translateKey)
+                  : t.voiceAssistantBusy
               }
             >
-              {!isVoiceAssistantRunning ? 'Unavailable' : 'Translate'}
-              <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">⇧F4</span>
+              {!isVoiceAssistantRunning ? t.offline : t.translate}
+              <span className="ml-2 text-xs opacity-60 bg-white/20 px-1.5 py-0.5 rounded">{translateKey}</span>
             </Button>
           </div>
         </div>
@@ -118,17 +140,17 @@ export const DashboardView = memo<DashboardViewProps>(({
         <div className="mt-10 pt-6 border-t border-gray-100 dark:border-dark-border">
            <div className="flex items-center justify-between mb-4">
                <div className="flex items-center space-x-3">
-                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-muted">Recent History</span>
+                 <span className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-dark-muted">{t.recentHistory}</span>
                  {lastSaved && (
                    <span className="text-[10px] text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/30 px-2 py-0.5 rounded-full flex items-center animate-in fade-in duration-300">
                      <Save className="w-3 h-3 mr-1" />
-                     Saved {lastSaved.toLocaleTimeString()}
+                     {t.saved} {lastSaved.toLocaleTimeString()}
                    </span>
                  )}
                </div>
                {history.length > 0 && (
                  <Button variant="ghost" size="sm" className="text-xs h-7 text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 hover:text-red-600 dark:hover:text-red-300" onClick={handleClearHistory} icon={<Trash2 className="w-3 h-3"/>}>
-                    Clear
+                    {t.clear}
                  </Button>
                )}
            </div>
@@ -137,25 +159,33 @@ export const DashboardView = memo<DashboardViewProps>(({
              {history.length === 0 ? (
                <div className="text-center py-8 text-gray-400 dark:text-dark-muted text-sm bg-gray-50 dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border border-dashed flex flex-col items-center">
                  <Clock className="w-8 h-8 mb-2 opacity-20" />
-                 <p>No history yet. Start recording to see results here.</p>
+                 <p>{t.noHistoryYet}</p>
                </div>
              ) : (
-               history.slice(0, 3).map((item) => (
+               history.slice(0, 3).map((item) => {
+                 // Safe date formatting
+                 const isValidDate = item.timestamp instanceof Date && !isNaN(item.timestamp.getTime());
+                 const timeStr = isValidDate ? item.timestamp.toLocaleTimeString() : t.unknownTime;
+                 const typeLabel = item.type === 'translate' ? t.translate : item.type === 'transcribe' ? t.transcribe : 'ASR';
+                 const typeColor = item.type === 'translate' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+
+                 return (
                  <div key={item.id} className="bg-white dark:bg-dark-surface p-4 rounded-xl border border-gray-100 dark:border-dark-border shadow-sm hover:shadow-md transition-all duration-200 group">
                     <div className="flex justify-between items-start mb-2">
-                       <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wide ${item.type === 'translate' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'}`}>
-                         {item.type}
+                       <span className={`text-[10px] px-2 py-0.5 rounded-full uppercase font-bold tracking-wide ${typeColor}`}>
+                         {typeLabel}
                        </span>
                        <span className="text-xs text-gray-400 dark:text-dark-muted flex items-center">
                          <Clock className="w-3 h-3 mr-1" />
-                         {new Date(item.timestamp).toLocaleTimeString()}
+                         {timeStr}
                        </span>
                     </div>
                     <p className="text-gray-700 dark:text-dark-text text-sm leading-relaxed font-medium">
-                       "{item.text}"
+                       {item.text || <span className="text-gray-400 italic">No text output</span>}
                     </p>
                  </div>
-               ))
+                 );
+               })
              )}
            </div>
         </div>

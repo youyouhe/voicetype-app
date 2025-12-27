@@ -230,6 +230,7 @@ pub async fn save_asr_config(
                 request.local_api_key.as_deref(),
                 request.cloud_endpoint.as_deref(),
                 request.cloud_api_key.as_deref(),
+                request.whisper_model.as_deref(),
             ).await {
                 Ok(config) => {
                     println!("✅ Rust: ASR config saved successfully");
@@ -1017,24 +1018,17 @@ async fn create_local_whisper_processor() -> Result<crate::voice_assistant::asr:
         println!("ℹ️  VAD disabled (set WHISPER_ENABLE_VAD=true to enable)");
     }
 
-    // Auto-detect optimal GPU backend
-    let gpu_detector = crate::voice_assistant::asr::gpu_detector::GpuDetector::new();
-    let optimal_backend = gpu_detector.get_preferred_backend();
-
+    // 🔥 简化：直接使用CPU后端，避免GPU detector死锁
     let config = WhisperRSConfig {
         model_path,
         language: None, // Auto-detect
         sampling_strategy: SamplingStrategyConfig::Greedy { best_of: 1 },
         translate: false,
         enable_vad,
-        backend: optimal_backend.clone(),
-        use_gpu_if_available: std::env::var("WHISPER_USE_GPU")
-            .unwrap_or_else(|_| "true".to_string())
-            .parse::<bool>()
-            .unwrap_or(true),
-        gpu_device_id: std::env::var("WHISPER_GPU_DEVICE_ID")
-            .ok()
-            .and_then(|id| id.parse::<u32>().ok()),
+        backend: crate::voice_assistant::asr::whisper_rs::WhisperBackend::CPU,
+        use_gpu_if_available: false,
+        gpu_device_id: None,
+        output_format: crate::voice_assistant::asr::whisper_rs::OutputFormat::Text,
     };
 
       // Use thread-safe creation with timeout to prevent crashes
@@ -1317,19 +1311,15 @@ pub async fn get_latency_data(
                         });
                     }
 
-                    // Calculate current average latency (last 10 records)
-                    let current_avg = if records.len() > 10 {
-                        records.iter().take(10).map(|r| r.latency_ms).sum::<i64>() / 10
-                    } else {
-                        records.iter().map(|r| r.latency_ms).sum::<i64>() / records.len() as i64
-                    };
+                    // Get the latest (most recent) latency value
+                    let current_latency = records.first().map(|r| r.latency_ms).unwrap_or(0);
 
-                    // Calculate trend (compare with previous 10 records)
-                    let trend = if records.len() > 20 {
-                        let previous_avg = records.iter().skip(10).take(10).map(|r| r.latency_ms).sum::<i64>() / 10;
-                        if current_avg > previous_avg {
+                    // Calculate trend (compare with second-to-last record)
+                    let trend = if records.len() >= 2 {
+                        let previous_latency = records.get(1).map(|r| r.latency_ms).unwrap_or(0);
+                        if current_latency > previous_latency {
                             "up"
-                        } else if current_avg < previous_avg {
+                        } else if current_latency < previous_latency {
                             "down"
                         } else {
                             "neutral"
@@ -1338,9 +1328,9 @@ pub async fn get_latency_data(
                         "neutral"
                     };
 
-                    let trend_value = if records.len() > 20 {
-                        let previous_avg = records.iter().skip(10).take(10).map(|r| r.latency_ms).sum::<i64>() / 10;
-                        current_avg - previous_avg
+                    let trend_value = if records.len() >= 2 {
+                        let previous_latency = records.get(1).map(|r| r.latency_ms).unwrap_or(0);
+                        current_latency - previous_latency
                     } else {
                         0
                     };
@@ -1355,9 +1345,9 @@ pub async fn get_latency_data(
                         })
                         .collect();
 
-                    println!("✅ Latency data: {}ms (trend: {}, records: {})", current_avg, trend, records.len());
+                    println!("✅ Latency data: {}ms (trend: {}, records: {})", current_latency, trend, records.len());
                     Ok(LatencyDataResponse {
-                        current: current_avg,
+                        current: current_latency,
                         trend: trend.to_string(),
                         trend_value,
                         history,

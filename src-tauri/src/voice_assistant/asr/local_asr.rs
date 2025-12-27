@@ -49,13 +49,15 @@ impl LocalASRProcessor {
         })
     }
 
-    async fn call_api(&self, audio_data: &[u8], lang: &str) -> Result<String, VoiceError> {
+    async fn call_api_with_format(&self, audio_data: &[u8], lang: &str, format: String) -> Result<String, VoiceError> {
         let form = multipart::Form::new()
             .part("file", multipart::Part::bytes(audio_data.to_vec())
                 .file_name("audio.wav")
                 .mime_str("audio/wav")?)
-            .text("response_format", "srt")
+            .text("response_format", format.clone())
             .text("language", lang.to_string());
+
+        println!("🔍 Sending ASR request with format={}, language={}", format, lang);
 
         let response = self.client
             .post(&self.api_url)
@@ -68,45 +70,124 @@ impl LocalASRProcessor {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(VoiceError::Other(format!("Local ASR API error: {} - {}", status, error_text)));
+            return Err(VoiceError::Other(format!("Local ASR API error ({} format): {} - {}", format, status, error_text)));
         }
 
         let response_text = response.text().await
             .map_err(|e| VoiceError::Network(e))?;
 
-        // Parse different response formats
-        if response_text.trim().starts_with('{') {
-            // JSON response
-            if let Ok(json_result) = serde_json::from_str::<Value>(&response_text) {
-                // Try new format: {"code":0,"msg":"ok","data":"transcription"}
-                if let (Some(code), Some(data)) = (
-                    json_result.get("code").and_then(|v| v.as_i64()),
-                    json_result.get("data").and_then(|v| v.as_str())
-                ) {
-                    if code == 0 {
-                        return Ok(data.to_string());
+        println!("🔍 ASR response ({} format): {} chars", format, response_text.len());
+        println!("📄 Response preview: {}", &response_text[..response_text.len().min(200)]);
+
+        Ok(response_text)
+    }
+
+    async fn call_api(&self, audio_data: &[u8], lang: &str) -> Result<String, VoiceError> {
+        // 🔥 根据API错误信息，优化格式尝试顺序：SRT → JSON → Text
+        let formats = vec!["srt", "json", "text"];
+
+        for format in formats {
+            println!("🔄 Trying response format: {}", format);
+
+            match self.call_api_with_format(audio_data, lang, format.to_string()).await {
+                Ok(response_text) => {
+                    // 处理响应
+                    let processed_text = self.process_response(&response_text, format)?;
+
+                    if !processed_text.is_empty() {
+                        println!("✅ Successfully processed response with {} format", format);
+                        return Ok(processed_text);
+                    } else {
+                        println!("⚠️ Empty result with {} format, trying next...", format);
                     }
                 }
-
-                // Try old format: {"result":[{"text":"","raw_text":"","clean_text":""}]}
-                if let Some(result) = json_result.get("result").and_then(|v| v.as_array()) {
-                    if let Some(first_item) = result.first() {
-                        if let Some(text) = first_item.get("text").and_then(|v| v.as_str()) {
-                            return Ok(text.to_string());
-                        }
-                    }
+                Err(e) => {
+                    println!("❌ Failed with {} format: {}, trying next...", format, e);
                 }
             }
         }
 
-        // If JSON parsing fails, treat as plain text (SRT format)
-        let cleaned_text = self.clean_srt_text(&response_text);
-        Ok(cleaned_text)
+        Err(VoiceError::Other("All response formats failed".to_string()))
     }
 
-    fn clean_srt_text(&self, srt_text: &str) -> String {
-        // Remove SRT timestamps and formatting, keep only the spoken text
-        srt_text
+    fn process_response(&self, response_text: &str, format: &str) -> Result<String, VoiceError> {
+        match format {
+            "json" => self.process_json_response(response_text),
+            "text" => Ok(response_text.trim().to_string()),
+            "srt" => {
+                // 🔥 SRT格式可能包装在JSON中，先尝试解析JSON
+                if response_text.trim().starts_with('{') {
+                    if let Ok(json_result) = serde_json::from_str::<Value>(response_text) {
+                        if let Some(data) = json_result.get("data").and_then(|v| v.as_str()) {
+                            println!("✅ Found SRT data in JSON wrapper");
+                            return self.process_srt_response(data);
+                        }
+                    }
+                }
+                // 如果不是JSON包装，直接处理SRT
+                self.process_srt_response(response_text)
+            },
+            _ => Ok(response_text.trim().to_string()),
+        }
+    }
+
+    fn process_json_response(&self, response_text: &str) -> Result<String, VoiceError> {
+        if !response_text.trim().starts_with('{') {
+            return Ok(response_text.trim().to_string());
+        }
+
+        if let Ok(json_result) = serde_json::from_str::<Value>(response_text) {
+            println!("✅ Successfully parsed JSON response");
+
+            // OpenAI Whisper API格式: {"text": "transcription"}
+            if let Some(text) = json_result.get("text").and_then(|v| v.as_str()) {
+                println!("✅ Found text in OpenAI format");
+                return Ok(text.to_string());
+            }
+
+            // Custom format: {"code":0,"msg":"ok","data":"transcription"}
+            if let (Some(code), Some(data)) = (
+                json_result.get("code").and_then(|v| v.as_i64()),
+                json_result.get("data").and_then(|v| v.as_str())
+            ) {
+                if code == 0 {
+                    println!("✅ Found text in custom format");
+                    return Ok(data.to_string());
+                }
+            }
+
+            // Array format: [{"text":"","raw_text":"","clean_text":""}]
+            if let Some(result) = json_result.get("result").and_then(|v| v.as_array()) {
+                if let Some(first_item) = result.first() {
+                    if let Some(text) = first_item.get("text").and_then(|v| v.as_str()) {
+                        println!("✅ Found text in array format");
+                        return Ok(text.to_string());
+                    }
+                }
+            }
+
+            // 尝试其他可能的字段
+            for field in ["transcription", "result", "output", "content"] {
+                if let Some(text) = json_result.get(field).and_then(|v| v.as_str()) {
+                    println!("✅ Found text in field '{}'", field);
+                    return Ok(text.to_string());
+                }
+            }
+
+            println!("⚠️ JSON parsed but no text field found");
+            println!("🔍 Full JSON: {}", serde_json::to_string_pretty(&json_result).unwrap_or_else(|_| "Failed to serialize".to_string()));
+        } else {
+            println!("❌ Failed to parse JSON response");
+        }
+
+        Ok(String::new())
+    }
+
+    fn process_srt_response(&self, srt_text: &str) -> Result<String, VoiceError> {
+        println!("🔍 Processing SRT response: {} chars", srt_text.len());
+
+        // SRT格式处理：移除时间戳和序号，只保留文本
+        let cleaned_text = srt_text
             .lines()
             .filter(|line| {
                 !line.contains("-->") &&
@@ -114,7 +195,16 @@ impl LocalASRProcessor {
                 !line.trim().is_empty()
             })
             .collect::<Vec<_>>()
-            .join(" ")
+            .join(" ");
+
+        println!("✅ Extracted text: {}", cleaned_text);
+
+        if cleaned_text.trim().is_empty() {
+            println!("⚠️ SRT processing resulted in empty text");
+            return Err(VoiceError::Other("SRT processing resulted in empty text".to_string()));
+        }
+
+        Ok(cleaned_text)
     }
 }
 

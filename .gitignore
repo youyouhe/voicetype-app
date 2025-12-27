@@ -12,6 +12,25 @@ dist
 dist-ssr
 *.local
 
+# Release packages
+releases/
+*.zip
+*.zip.sha256
+
+# Tauri build
+src-tauri/target/
+src-tauri/.tauri-data/
+
+# Build artifacts
+*.msi
+*.exe
+*.dll
+
+# Temporary files
+npm
+nul
+[Step*
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -22,3 +41,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude
+.claude/
+[Step*

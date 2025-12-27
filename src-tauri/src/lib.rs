@@ -3,6 +3,75 @@ pub mod commands;
 pub mod database;
 pub mod utils;
 
+/// Load CUDA DLLs from the resources directory
+/// This allows the application to use CUDA acceleration without requiring
+/// users to install CUDA Runtime separately.
+fn load_cuda_dlls() -> Result<(), Box<dyn std::error::Error>> {
+    // Get the resource directory path
+    let mut resource_dir = std::env::current_exe()?;
+    resource_dir.pop(); // Remove exe name
+
+    // Try different possible resource locations
+    let possible_dirs = vec![
+        resource_dir.join("cuda"),           // Installed: app/cuda/
+        resource_dir.join("resources").join("cuda"),  // Dev: target/debug/resources/cuda/
+    ];
+
+    let cuda_dir = possible_dirs
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or("CUDA resources directory not found")?;
+
+    println!("🔍 Looking for CUDA DLLs in: {}", cuda_dir.display());
+
+    // Required CUDA DLLs
+    let required_dlls = vec![
+        "cudart64_",
+        "cublas64_",
+        "cublasLt64_",
+    ];
+
+    let mut loaded_count = 0;
+
+    // Find and load DLLs
+    for entry in std::fs::read_dir(&cuda_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().and_then(|s| s.to_str()) != Some("dll") {
+            continue;
+        }
+
+        let dll_name = path.file_name()
+            .and_then(|n| n.to_str())
+            .ok_or("Invalid DLL name")?;
+
+        // Check if this is one of the required CUDA DLLs
+        let is_required = required_dlls.iter()
+            .any(|prefix| dll_name.starts_with(prefix));
+
+        if is_required {
+            // Try to load the DLL using libloading
+            match unsafe { libloading::Library::new(&path) } {
+                Ok(_) => {
+                    println!("  ✓ Loaded: {}", dll_name);
+                    loaded_count += 1;
+                }
+                Err(e) => {
+                    println!("  ✗ Failed to load {}: {}", dll_name, e);
+                }
+            }
+        }
+    }
+
+    if loaded_count == 0 {
+        Err("No CUDA DLLs were loaded".into())
+    } else {
+        println!("🚀 Loaded {} CUDA DLL(s)", loaded_count);
+        Ok(())
+    }
+}
+
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 
@@ -29,7 +98,7 @@ use voice_assistant::{
     GlobalHotkeyManager, ensure_dependencies,
     // Model management commands
     get_available_models, download_model, delete_model, set_active_model,
-    get_active_model_info, get_model_stats
+    get_active_model_info, get_model_stats, check_model_loaded
 };
 
 // Import commands module
@@ -49,11 +118,11 @@ use commands::{
 // Import global whisper manager commands
 use voice_assistant::global_whisper::{get_whisper_manager_status, reload_whisper_processor, clear_whisper_processor};
 
-// Import GPU backend commands - TEMPORARILY DISABLED
-// use commands::gpu_backend::{
-//     get_gpu_backend_status, set_preferred_gpu_backend, redetect_gpu_backends,
-//     get_backend_details, test_backend_performance
-// };
+// Import GPU backend commands
+use commands::gpu_backend::{
+    get_gpu_backend_status, set_preferred_gpu_backend, redetect_gpu_backends,
+    get_backend_details, test_backend_performance, check_nvidia_driver
+};
 
 use std::sync::{Arc, Mutex};
 use commands::DatabaseState;
@@ -61,6 +130,13 @@ use commands::DatabaseState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Load CUDA DLLs from resources if available
+    if let Err(e) = load_cuda_dlls() {
+        println!("ℹ️  CUDA DLL loading: {} (falling back to CPU mode)", e);
+    } else {
+        println!("✅ CUDA DLLs loaded successfully");
+    }
+
     // Ensure system dependencies are available
     if let Err(e) = ensure_dependencies() {
         eprintln!("⚠️  Warning: Could not ensure system dependencies: {}", e);
@@ -82,26 +158,9 @@ pub fn run() {
         }
     });
 
-    // Initialize and perform GPU backend detection on startup
-    println!("🔍 Initializing GPU backend detection...");
-    let gpu_detector = voice_assistant::asr::gpu_detector::get_gpu_detector();
-    let detector_guard = gpu_detector.lock().unwrap();
-
-    println!("📊 GPU Backend Detection Results:");
-    println!("   Available Backends:");
-    for backend in detector_guard.get_available_backends() {
-        let priority = detector_guard.backend_priority(&backend);
-        let status = if backend == detector_guard.get_preferred_backend() {
-            "✅ SELECTED"
-        } else {
-            "✓ Available"
-        };
-        println!("     - {} (Priority: {}) {}", backend, priority, status);
-    }
-
-    println!("   Preferred Backend: {}", detector_guard.get_preferred_backend());
-    println!("   Backend Info: {}", detector_guard.get_backend_info());
-    println!("🎯 GPU backend detection completed!");
+    // 🔥 简化：跳过启动时的GPU检测，使用CPU后端避免死锁
+    println!("ℹ️  GPU backend detection skipped - using CPU backend");
+    println!("💡 To enable GPU acceleration, recompile with CUDA/Vulkan features");
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -209,16 +268,18 @@ pub fn run() {
             set_active_model,
             get_active_model_info,
             get_model_stats,
+            check_model_loaded,
             // Global WhisperRS manager commands
             get_whisper_manager_status,
             reload_whisper_processor,
             clear_whisper_processor,
-            // GPU backend management commands - TEMPORARILY DISABLED
-            // get_gpu_backend_status,
-            // set_preferred_gpu_backend,
-            // redetect_gpu_backends,
-            // get_backend_details,
-            // test_backend_performance
+            // GPU backend management commands
+            check_nvidia_driver,
+            get_gpu_backend_status,
+            set_preferred_gpu_backend,
+            redetect_gpu_backends,
+            get_backend_details,
+            test_backend_performance
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

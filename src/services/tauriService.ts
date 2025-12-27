@@ -64,6 +64,10 @@ export class TauriService {
     return await invoke<VoiceAssistantConfig>('get_voice_assistant_config');
   }
 
+  static async getHotkeyConfig(): Promise<any | null> {
+    return await invoke<any | null>('get_hotkey_config');
+  }
+
   // Testing
   static async testASR(processorType: 'cloud' | 'local'): Promise<string> {
     return await invoke<string>('test_asr', { processorType });
@@ -115,6 +119,11 @@ export class TauriService {
     return await invoke<any>('get_model_stats');
   }
 
+  // History functions
+  static async getHistoryRecords(limit?: number): Promise<any[]> {
+    return await invoke<any[]>('get_history_records', { limit });
+  }
+
   // Legacy functions (keep for compatibility)
   static async greet(name: string): Promise<string> {
     return await invoke<string>('greet', { name });
@@ -123,4 +132,19 @@ export class TauriService {
   static async add(a: number, b: number): Promise<number> {
     return await invoke<number>('add', { a, b });
   }
+
+  // NVIDIA Driver Check
+  static async checkNvidiaDriver(): Promise<NvidiaDriverInfo> {
+    return await invoke<NvidiaDriverInfo>('check_nvidia_driver');
+  }
+}
+
+export interface NvidiaDriverInfo {
+  installed: boolean;
+  driver_version: string | null;
+  cuda_version: string | null;
+  minimum_required: string;
+  is_compatible: boolean;
+  gpu_name: string | null;
+  error_message: string | null;
 }

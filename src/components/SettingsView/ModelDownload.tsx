@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Download, Trash2, Play, Check, AlertCircle, Loader2, HardDrive } from 'lucide-react';
 import { TauriService } from '../../services/tauriService';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface WhisperModel {
   name: string;
@@ -23,7 +24,30 @@ interface ModelStats {
   models_dir: string;
 }
 
+// Model descriptions mapping for i18n
+const MODEL_DESCRIPTIONS: Record<string, { zh: string; en: string }> = {
+  'large-v3-turbo': {
+    zh: '最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用',
+    en: 'The latest efficient model that significantly improves inference speed while maintaining high accuracy, suitable for production use'
+  },
+  'large-v2': {
+    zh: '成熟稳定的模型，具有良好的准确性和兼容性',
+    en: 'A mature and stable model with good accuracy and compatibility'
+  }
+};
+
 export const ModelDownload: React.FC = () => {
+  const { t, language } = useLanguage();
+
+  // Helper function to get localized description
+  const getModelDescription = (modelName: string, originalDesc: string): string => {
+    const descMap = MODEL_DESCRIPTIONS[modelName];
+    if (descMap) {
+      return language === 'zh-CN' ? descMap.zh : descMap.en;
+    }
+    return originalDesc; // Fallback to original description
+  };
+
   const [models, setModels] = useState<WhisperModel[]>([]);
   const [stats, setStats] = useState<ModelStats | null>(null);
   const [activeModel, setActiveModel] = useState<string | null>(null);
@@ -277,7 +301,7 @@ export const ModelDownload: React.FC = () => {
     return (
       <div className="flex items-center justify-center py-12">
         <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
-        <span className="ml-2 text-gray-600">Loading models...</span>
+        <span className="ml-2 text-gray-600 dark:text-gray-400">{t.loadingModels}</span>
       </div>
     );
   }
@@ -286,66 +310,66 @@ export const ModelDownload: React.FC = () => {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">🎤 Whisper Models</h3>
-        <p className="text-sm text-gray-600">
-          Download and manage local Whisper models for offline speech recognition
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">{t.whisperModelsWithIcon}</h3>
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          {t.modelsDesc}
         </p>
       </div>
 
       {/* Error Display */}
       {error && (
-        <div className="flex items-center p-4 bg-red-50 border border-red-200 rounded-lg">
-          <AlertCircle className="w-5 h-5 text-red-500 mr-2" />
-          <span className="text-red-700 text-sm">{error}</span>
+        <div className="flex items-center p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+          <AlertCircle className="w-5 h-5 text-red-500 dark:text-red-400 mr-2" />
+          <span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
         </div>
       )}
 
       {/* Statistics */}
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
+          <div className="bg-white dark:bg-dark-surface p-4 rounded-lg border border-gray-200 dark:border-dark-border">
             <div className="flex items-center">
               <HardDrive className="w-5 h-5 text-blue-500 mr-2" />
               <div>
-                <p className="text-xs text-gray-500">Total Models</p>
-                <p className="text-lg font-semibold text-gray-900">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t.totalModels}</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {stats.downloaded_models}/{stats.total_models}
                 </p>
               </div>
             </div>
           </div>
-          
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
+
+          <div className="bg-white dark:bg-dark-surface p-4 rounded-lg border border-gray-200 dark:border-dark-border">
             <div className="flex items-center">
               <Download className="w-5 h-5 text-green-500 mr-2" />
               <div>
-                <p className="text-xs text-gray-500">Downloaded</p>
-                <p className="text-lg font-semibold text-gray-900">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t.downloaded}</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {formatSize(stats.downloaded_size_mb)}
                 </p>
               </div>
             </div>
           </div>
-          
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
+
+          <div className="bg-white dark:bg-dark-surface p-4 rounded-lg border border-gray-200 dark:border-dark-border">
             <div className="flex items-center">
               <Loader2 className="w-5 h-5 text-orange-500 mr-2" />
               <div>
-                <p className="text-xs text-gray-500">Available</p>
-                <p className="text-lg font-semibold text-gray-900">
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t.available}</p>
+                <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
                   {formatSize(stats.total_size_mb - stats.downloaded_size_mb)}
                 </p>
               </div>
             </div>
           </div>
-          
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
+
+          <div className="bg-white dark:bg-dark-surface p-4 rounded-lg border border-gray-200 dark:border-dark-border">
             <div className="flex items-center">
               <Play className="w-5 h-5 text-purple-500 mr-2" />
               <div>
-                <p className="text-xs text-gray-500">Active</p>
-                <p className="text-sm font-semibold text-gray-900">
-                  {activeModel || 'None'}
+                <p className="text-xs text-gray-500 dark:text-gray-400">{t.activeModel}</p>
+                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                  {activeModel || t.none}
                 </p>
               </div>
             </div>
@@ -356,37 +380,37 @@ export const ModelDownload: React.FC = () => {
       {/* Models List */}
       <div className="space-y-4">
         {models.map((model) => (
-          <div key={model.name} className="bg-white p-4 rounded-lg border border-gray-200">
+          <div key={model.name} className="bg-white dark:bg-dark-surface p-4 rounded-lg border border-gray-200 dark:border-dark-border">
             <div className="flex items-start justify-between">
               <div className="flex-1">
                 <div className="flex items-center">
-                  <h4 className="text-base font-semibold text-gray-900">{model.display_name}</h4>
+                  <h4 className="text-base font-semibold text-gray-900 dark:text-gray-100">{model.display_name}</h4>
                   {model.is_downloaded && (
                     <Check className="w-5 h-5 text-green-500 ml-2" />
                   )}
                   {activeModel === model.name && (
-                    <span className="ml-2 px-2 py-1 text-xs bg-purple-100 text-purple-700 rounded-full">
-                      Active
+                    <span className="ml-2 px-2 py-1 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full">
+                      {t.activeModel}
                     </span>
                   )}
                 </div>
-                
-                <p className="text-sm text-gray-600 mt-1">{model.description}</p>
-                <div className="flex items-center mt-2 text-xs text-gray-500">
-                  <span className="font-medium">Size:</span> {formatSize(model.size_mb)}
+
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{getModelDescription(model.name, model.description)}</p>
+                <div className="flex items-center mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  <span className="font-medium">{t.sizeLabel}</span> {formatSize(model.size_mb)}
                   <span className="mx-2">•</span>
-                  <span className="font-medium">File:</span> {model.file_name}
+                  <span className="font-medium">{t.fileLabel}</span> {model.file_name}
                 </div>
 
                 {/* Download Progress */}
                 {model.is_downloading && (
                   <div className="mt-3">
                     <div className="flex items-center justify-between text-sm mb-1">
-                      <span className="text-gray-600">Downloading...</span>
-                      <span className="text-gray-900 font-medium">{model.download_progress.toFixed(1)}%</span>
+                      <span className="text-gray-600 dark:text-gray-400">{t.downloading}</span>
+                      <span className="text-gray-900 dark:text-gray-100 font-medium">{model.download_progress.toFixed(1)}%</span>
                     </div>
-                    <div className="w-full bg-gray-200 rounded-full h-2">
-                      <div 
+                    <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                      <div
                         className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                         style={{ width: `${model.download_progress}%` }}
                       />
@@ -405,7 +429,7 @@ export const ModelDownload: React.FC = () => {
                         className="px-3 py-2 bg-purple-500 text-white text-sm rounded-lg hover:bg-purple-600 transition-colors flex items-center"
                       >
                         <Play className="w-4 h-4 mr-1" />
-                        Use
+                        {t.use}
                       </button>
                     )}
                     <button
@@ -413,7 +437,7 @@ export const ModelDownload: React.FC = () => {
                       className="px-3 py-2 bg-red-500 text-white text-sm rounded-lg hover:bg-red-600 transition-colors flex items-center"
                     >
                       <Trash2 className="w-4 h-4 mr-1" />
-                      Delete
+                      {t.delete}
                     </button>
                   </>
                 ) : (
@@ -425,12 +449,12 @@ export const ModelDownload: React.FC = () => {
                     {model.is_downloading ? (
                       <>
                         <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-                        Downloading...
+                        {t.downloading}
                       </>
                     ) : (
                       <>
                         <Download className="w-4 h-4 mr-1" />
-                        Download
+                        {t.download}
                       </>
                     )}
                   </button>
@@ -443,9 +467,9 @@ export const ModelDownload: React.FC = () => {
 
       {/* Storage Location */}
       {stats && (
-        <div className="bg-gray-50 p-4 rounded-lg">
-          <h4 className="text-sm font-medium text-gray-900 mb-1">Storage Location</h4>
-          <p className="text-xs text-gray-600 font-mono">{stats.models_dir}</p>
+        <div className="bg-gray-50 dark:bg-slate-800 p-4 rounded-lg">
+          <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100 mb-1">{t.storageLocation}</h4>
+          <p className="text-xs text-gray-600 dark:text-gray-400 font-mono">{stats.models_dir}</p>
         </div>
       )}
     </div>

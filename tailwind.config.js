@@ -20,15 +20,29 @@ export default {
           800: '#1e40af',
           900: '#1e3a8a',
         },
+        // Override slate colors for pure black dark mode
+        slate: {
+          50: '#f8fafc',
+          100: '#f1f5f9',
+          200: '#e2e8f0',
+          300: '#cbd5e1',
+          400: '#94a3b8',
+          500: '#64748b',
+          600: '#475569',
+          700: '#334155',
+          750: '#1a1a1a',
+          800: '#0a0a0a',
+          850: '#050505',
+          900: '#000000',
+          950: '#000000',
+        },
+        // Custom dark theme colors (with 'dark-' prefix to use in classes)
+        'dark-bg': '#000000',
+        'dark-surface': '#0a0a0a',
+        'dark-border': '#1a1a1a',
+        'dark-text': '#ffffff',
+        'dark-muted': '#a0a0a0',
       },
-      // Custom dark theme colors
-      dark: {
-        bg: '#0f172a',
-        surface: '#1e293b',
-        border: '#334155',
-        text: '#f1f5f9',
-        muted: '#94a3b8',
-      }
     },
   },
   plugins: [],

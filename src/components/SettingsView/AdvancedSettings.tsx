@@ -3,7 +3,8 @@ import { Mic, Settings, RefreshCw, Volume2 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 import { ToggleInput } from '../ui/Input';
 import { Input } from '../ui/Input';
-import { HotkeyConfig, TypingDelays } from '../../types';
+import { HotkeyConfig } from '../../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface AudioDevice {
   id: string;
@@ -12,6 +13,8 @@ interface AudioDevice {
 }
 
 export const AdvancedSettings: React.FC = () => {
+  const { t } = useLanguage();
+
   const [micDevices, setMicDevices] = useState<AudioDevice[]>([]);
   const [selectedMic, setSelectedMic] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -21,15 +24,6 @@ export const AdvancedSettings: React.FC = () => {
   const [saveWavFiles, setSaveWavFiles] = useState(true);
   const [hasLoadedFromDatabase, setHasLoadedFromDatabase] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
-
-  // Typing Delays Settings
-  const [typingDelays, setTypingDelays] = useState<TypingDelays>({
-    clipboard_update_ms: 100,         // 剪贴板更新等待时间
-    keyboard_events_settle_ms: 300,   // 键盘事件处理等待时间
-    typing_complete_ms: 500,          // 打字完成后等待时间
-    character_interval_ms: 100,       // 字符间延迟时间
-    short_operation_ms: 100,          // 其他短操作延迟时间
-  });
 
   // Check if we're running in Tauri
   const checkTauriEnvironment = () => {
@@ -146,9 +140,9 @@ export const AdvancedSettings: React.FC = () => {
         // Use Tauri backend to test microphone
         const success = await invoke<boolean>('test_microphone', { deviceId: selectedMic });
         if (success) {
-          alert('Microphone test successful! Audio input is working.');
+          alert(t.micTestSuccess);
         } else {
-          alert('Microphone test failed. Please check your microphone settings.');
+          alert(t.micTestFailed);
         }
       } else {
         // Use WebRTC for web development
@@ -172,11 +166,11 @@ export const AdvancedSettings: React.FC = () => {
         stream.getTracks().forEach(track => track.stop());
         audioContext.close();
 
-        alert('Microphone test successful! Audio input is working.');
+        alert(t.micTestSuccess);
       }
     } catch (error) {
       console.error('Microphone test failed:', error);
-      alert('Microphone test failed. Please check your microphone settings.');
+      alert(t.micTestFailed);
     }
   };
 
@@ -197,33 +191,11 @@ export const AdvancedSettings: React.FC = () => {
           if (config) {
             console.log('📥 Loaded hotkey config from database:');
             console.log('  - save_wav_files:', config.save_wav_files);
-            console.log('  - clipboard_update_ms:', config.clipboard_update_ms);
-            console.log('  - keyboard_events_settle_ms:', config.keyboard_events_settle_ms);
-            console.log('  - typing_complete_ms:', config.typing_complete_ms);
-            console.log('  - character_interval_ms:', config.character_interval_ms);
-            console.log('  - short_operation_ms:', config.short_operation_ms);
-
             console.log('🔄 Setting state with loaded values...');
             setSaveWavFiles(config.save_wav_files);
-
-            const newTypingDelays = {
-              clipboard_update_ms: config.clipboard_update_ms,
-              keyboard_events_settle_ms: config.keyboard_events_settle_ms,
-              typing_complete_ms: config.typing_complete_ms,
-              character_interval_ms: config.character_interval_ms,
-              short_operation_ms: config.short_operation_ms,
-            };
-            setTypingDelays(newTypingDelays);
-            console.log('✅ State updated with typing delays:', newTypingDelays);
+            console.log('✅ State updated with save_wav_files:', config.save_wav_files);
           } else {
             console.log('📥 No hotkey config found, using defaults');
-            console.log('🔄 Setting state with default typing delays:', {
-              clipboard_update_ms: 100,
-              keyboard_events_settle_ms: 300,
-              typing_complete_ms: 500,
-              character_interval_ms: 100,
-              short_operation_ms: 100,
-            });
           }
         } catch (error) {
           console.error('❌ Failed to load hotkey configuration:', error);
@@ -260,14 +232,8 @@ export const AdvancedSettings: React.FC = () => {
 
         // Check if values actually changed to avoid unnecessary database writes
         const saveWavFilesChanged = !existingConfig || existingConfig.save_wav_files !== saveWavFiles;
-        const typingDelaysChanged = !existingConfig ||
-          existingConfig.clipboard_update_ms !== typingDelays.clipboard_update_ms ||
-          existingConfig.keyboard_events_settle_ms !== typingDelays.keyboard_events_settle_ms ||
-          existingConfig.typing_complete_ms !== typingDelays.typing_complete_ms ||
-          existingConfig.character_interval_ms !== typingDelays.character_interval_ms ||
-          existingConfig.short_operation_ms !== typingDelays.short_operation_ms;
 
-        if (!saveWavFilesChanged && !typingDelaysChanged) {
+        if (!saveWavFilesChanged) {
           return;
         }
 
@@ -277,7 +243,6 @@ export const AdvancedSettings: React.FC = () => {
           trigger_delay_ms: existingConfig?.trigger_delay_ms || 300,
           anti_mistouch_enabled: existingConfig?.anti_mistouch_enabled ?? true,
           save_wav_files: saveWavFiles, // Update only this setting
-          typing_delays: typingDelays, // Update only delays
         };
 
         const result = await invoke('save_hotkey_config', { request: config });
@@ -288,30 +253,30 @@ export const AdvancedSettings: React.FC = () => {
     } else {
       // Save not possible - conditions not met
     }
-  }, [saveWavFiles, typingDelays, isTauri, hasLoadedFromDatabase, isInitializing]);
+  }, [saveWavFiles, isTauri, hasLoadedFromDatabase, isInitializing]);
 
-  // Trigger save when saveWavFiles or typingDelays changes
+  // Trigger save when saveWavFiles changes
   useEffect(() => {
     if (!isInitializing && hasLoadedFromDatabase) {
       saveHotkeyConfig().catch(error => {
         // Error handling for save failure
       });
     }
-  }, [saveWavFiles, typingDelays, saveHotkeyConfig, hasLoadedFromDatabase, isInitializing]);
+  }, [saveWavFiles, saveHotkeyConfig, hasLoadedFromDatabase, isInitializing]);
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text mb-2 flex items-center">
           <Settings className="w-6 h-6 mr-2" />
-          Advanced Settings
+          {t.advancedSettingsFullTitle}
         </h2>
         <p className="text-gray-600 dark:text-dark-muted">
-          Configure advanced audio and system settings.
+          {t.configureAdvancedSettings}
         </p>
         {isTauri && (
           <p className="text-xs text-green-600 dark:text-green-400 mt-1">
-            ✓ Running in Tauri native environment
+            {t.runningInTauriNative}
           </p>
         )}
       </div>
@@ -321,7 +286,7 @@ export const AdvancedSettings: React.FC = () => {
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text flex items-center">
             <Mic className="w-5 h-5 mr-2" />
-            Audio Input Device
+            {t.audioInputDevice}
           </h3>
           <button
             onClick={loadMicrophones}
@@ -329,7 +294,7 @@ export const AdvancedSettings: React.FC = () => {
             className="flex items-center px-3 py-1 text-sm bg-gray-100 dark:bg-dark-bg hover:bg-gray-200 dark:hover:bg-dark-border rounded-md transition-colors"
           >
             <RefreshCw className={`w-4 h-4 mr-1 ${isLoading ? 'animate-spin' : ''}`} />
-            Refresh
+            {t.refresh}
           </button>
         </div>
 
@@ -337,7 +302,7 @@ export const AdvancedSettings: React.FC = () => {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-dark-text mb-2">
-                Select Microphone
+                {t.selectMicrophone}
               </label>
               <select
                 value={selectedMic || ''}
@@ -345,17 +310,17 @@ export const AdvancedSettings: React.FC = () => {
                 className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border bg-white dark:bg-dark-surface text-gray-900 dark:text-dark-text rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
               >
                 <option value="" disabled>
-                  Select a microphone...
+                  {t.selectAMicrophone}
                 </option>
                 {micDevices.map((mic) => (
                   <option key={mic.id} value={mic.id}>
-                    {mic.name} {mic.is_default && '(Default)'}
+                    {mic.name} {mic.is_default && t.default}
                   </option>
                 ))}
               </select>
               {selectedMic && (
                 <p className="mt-1 text-xs text-gray-500 dark:text-dark-muted">
-                  Selected: {micDevices.find(m => m.id === selectedMic)?.name}
+                  {t.selected} {micDevices.find(m => m.id === selectedMic)?.name}
                 </p>
               )}
             </div>
@@ -365,10 +330,10 @@ export const AdvancedSettings: React.FC = () => {
                 <Volume2 className="w-5 h-5 text-gray-400 dark:text-dark-muted mr-3" />
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-dark-text">
-                    Current Selection
+                    {t.currentSelection}
                   </p>
                   <p className="text-xs text-gray-500 dark:text-dark-muted">
-                    {micDevices.find(m => m.id === selectedMic)?.name || 'No microphone selected'}
+                    {micDevices.find(m => m.id === selectedMic)?.name || t.noMicrophoneSelected}
                   </p>
                 </div>
               </div>
@@ -377,33 +342,33 @@ export const AdvancedSettings: React.FC = () => {
                 disabled={!selectedMic}
                 className="px-3 py-1 text-sm bg-primary-500 hover:bg-primary-600 text-white rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Test Microphone
+                {t.testMicrophone}
               </button>
             </div>
 
             <div className="text-xs text-gray-500 dark:text-dark-muted">
-              <p>• Select your preferred microphone for voice input</p>
-              <p>• Use the test button to verify microphone functionality</p>
-              <p>• Your selection will be saved automatically</p>
-              {isTauri && <p>• Using system audio API for device detection</p>}
+              <p>{t.selectMicrophoneDesc}</p>
+              <p>{t.testButtonDesc}</p>
+              <p>{t.autoSaveDesc}</p>
+              {isTauri && <p>{t.systemAudioApiDesc}</p>}
             </div>
           </div>
         ) : (
           !isLoading && (
             <div className="text-center py-8 text-gray-500 dark:text-dark-muted">
               <Mic className="w-12 h-12 mx-auto mb-3 opacity-30" />
-              <p>No microphones detected</p>
+              <p>{t.noMicrophonesDetected}</p>
               <p className="text-sm">
                 {isTauri
-                  ? 'Please check your system audio settings'
-                  : 'Please grant microphone permission to detect audio devices'
+                  ? t.checkSystemAudioSettings
+                  : t.grantMicrophonePermission
                 }
               </p>
               <button
                 onClick={loadMicrophones}
                 className="mt-3 px-4 py-2 bg-primary-500 hover:bg-primary-600 text-white rounded-md text-sm transition-colors"
               >
-                {isTauri ? 'Refresh Devices' : 'Request Microphone Access'}
+                {isTauri ? t.refreshDevices : t.requestMicrophoneAccess}
               </button>
             </div>
           )
@@ -414,92 +379,26 @@ export const AdvancedSettings: React.FC = () => {
       <div className="border-t border-gray-200 dark:border-dark-border pt-6">
         <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-4">
           <Volume2 className="w-5 h-5 inline mr-2" />
-          Audio Settings
+          {t.audioSettings}
         </h3>
         <div className="bg-white dark:bg-dark-secondary rounded-lg border border-gray-200 dark:border-dark-border p-4">
           <div className="space-y-4">
             <ToggleInput
-              label="Save WAV Files"
+              label={t.saveWavFiles}
               checked={saveWavFiles}
               onChange={setSaveWavFiles}
-              description="Save recorded audio as WAV files after processing for debugging and backup purposes."
+              description={t.saveWavFilesLongDesc}
             />
 
             {isTauri && (
               <div className="mt-4 p-3 bg-gray-50 dark:bg-dark-primary rounded-md">
-                <p className="text-sm text-gray-600 dark:text-dark-muted">
-                  <strong>Note:</strong> Changes to this setting will be saved automatically.
-                </p>
+                <p className="text-sm text-gray-600 dark:text-dark-muted" dangerouslySetInnerHTML={{ __html: t.noteChangesSavedAutomatically }} />
               </div>
             )}
           </div>
         </div>
       </div>
 
-      {/* Typing Delays Settings */}
-      <div className="border-t border-gray-200 dark:border-dark-border pt-6">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text mb-4">
-          <Settings className="w-5 h-5 inline mr-2" />
-          Typing Delays (milliseconds)
-        </h3>
-        <div className="bg-white dark:bg-dark-secondary rounded-lg border border-gray-200 dark:border-dark-border p-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Input
-              label="Clipboard Update Wait"
-              type="number"
-              step={50}
-              value={typingDelays.clipboard_update_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, clipboard_update_ms: Number(value)}))}
-              description="Wait for clipboard to update"
-              autoFocus={false}
-            />
-            <Input
-              label="Keyboard Events Settle"
-              type="number"
-              step={50}
-              value={typingDelays.keyboard_events_settle_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, keyboard_events_settle_ms: Number(value)}))}
-              description="Ensure keyboard events are fully processed"
-              autoFocus={false}
-            />
-            <Input
-              label="Typing Complete Wait"
-              type="number"
-              step={50}
-              value={typingDelays.typing_complete_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, typing_complete_ms: Number(value)}))}
-              description="Ensure all character input completes"
-              autoFocus={false}
-            />
-            <Input
-              label="Character Interval"
-              type="number"
-              step={10}
-              value={typingDelays.character_interval_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, character_interval_ms: Number(value)}))}
-              description="Delay between characters (important for Chinese)"
-              autoFocus={false}
-            />
-            <Input
-              label="Short Operation Delay"
-              type="number"
-              step={10}
-              value={typingDelays.short_operation_ms}
-              onChange={(value) => setTypingDelays(prev => ({...prev, short_operation_ms: Number(value)}))}
-              description="Other short operation delays"
-              autoFocus={false}
-            />
-          </div>
-
-          {isTauri && (
-            <div className="mt-4 p-3 bg-gray-50 dark:bg-dark-primary rounded-md">
-              <p className="text-sm text-gray-600 dark:text-dark-muted">
-                <strong>Note:</strong> These delays control typing behavior and are saved automatically. Adjust them if you experience timing issues with text input.
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 };
