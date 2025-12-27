@@ -10,17 +10,17 @@ export const StatusCircle: React.FC<StatusCircleProps> = ({ status }) => {
   const getStatusConfig = () => {
     switch (status) {
       case AppStatus.Idle:
-        return { color: 'bg-gray-100 text-gray-400', icon: Mic, ring: 'ring-gray-200' };
+        return { color: 'bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-gray-500', icon: Mic, ring: 'ring-gray-200 dark:ring-slate-700' };
       case AppStatus.Recording:
-        return { color: 'bg-red-50 text-red-500', icon: Mic, ring: 'ring-red-100' };
+        return { color: 'bg-red-50 dark:bg-red-900/30 text-red-500 dark:text-red-400', icon: Mic, ring: 'ring-red-100 dark:ring-red-900/50' };
       case AppStatus.Processing:
-        return { color: 'bg-blue-50 text-blue-500', icon: Loader, ring: 'ring-blue-100' };
+        return { color: 'bg-blue-50 dark:bg-blue-900/30 text-blue-500 dark:text-blue-400', icon: Loader, ring: 'ring-blue-100 dark:ring-blue-900/50' };
       case AppStatus.Translating:
-        return { color: 'bg-green-50 text-green-500', icon: Languages, ring: 'ring-green-100' };
+        return { color: 'bg-green-50 dark:bg-green-900/30 text-green-500 dark:text-green-400', icon: Languages, ring: 'ring-green-100 dark:ring-green-900/50' };
       case AppStatus.Error:
-        return { color: 'bg-red-50 text-red-600', icon: XCircle, ring: 'ring-red-200' };
+        return { color: 'bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400', icon: XCircle, ring: 'ring-red-200 dark:ring-red-900/50' };
       default:
-        return { color: 'bg-gray-100', icon: Mic, ring: 'ring-gray-200' };
+        return { color: 'bg-gray-100 dark:bg-slate-800', icon: Mic, ring: 'ring-gray-200 dark:ring-slate-700' };
     }
   };
 
@@ -54,17 +54,17 @@ export const StatusCircle: React.FC<StatusCircleProps> = ({ status }) => {
 
 export const StatusIndicator: React.FC<{ status: AppStatus }> = ({ status }) => {
     const map = {
-        [AppStatus.Idle]: { color: 'bg-gray-400', label: 'Idle' },
-        [AppStatus.Recording]: { color: 'bg-red-500', label: 'Recording' },
-        [AppStatus.Processing]: { color: 'bg-blue-500', label: 'Processing' },
-        [AppStatus.Translating]: { color: 'bg-green-500', label: 'Translating' },
-        [AppStatus.Error]: { color: 'bg-red-600', label: 'Error' },
+        [AppStatus.Idle]: { color: 'bg-gray-400 dark:bg-gray-500', label: 'Idle' },
+        [AppStatus.Recording]: { color: 'bg-red-500 dark:bg-red-400', label: 'Recording' },
+        [AppStatus.Processing]: { color: 'bg-blue-500 dark:bg-blue-400', label: 'Processing' },
+        [AppStatus.Translating]: { color: 'bg-green-500 dark:bg-green-400', label: 'Translating' },
+        [AppStatus.Error]: { color: 'bg-red-600 dark:bg-red-500', label: 'Error' },
     }
     const current = map[status];
     return (
-        <div className="flex items-center space-x-2 px-3 py-1 bg-gray-50 rounded-full border border-gray-200">
+        <div className="flex items-center space-x-2 px-3 py-1 bg-gray-50 dark:bg-slate-800 rounded-full border border-gray-200 dark:border-slate-700">
             <div className={`w-2.5 h-2.5 rounded-full ${current.color} ${status === AppStatus.Recording ? 'animate-pulse' : ''}`} />
-            <span className="text-xs font-medium text-gray-600 uppercase tracking-wide">{current.label}</span>
+            <span className="text-xs font-medium text-gray-600 dark:text-gray-400 uppercase tracking-wide">{current.label}</span>
         </div>
     )
 }

@@ -1,11 +1,11 @@
 import React, { memo } from 'react';
-import { Mic, Keyboard, Palette, Sliders, Monitor, Download } from 'lucide-react';
+import { Mic, Keyboard, Sliders, Monitor, Download } from 'lucide-react';
 import { NavTab } from '../../types';
 import { ASRSettings, ShortcutSettings, PlaceholderSettings } from './SettingsContent';
-import { AppearanceSettings } from './AppearanceSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { SystemInfoSettings } from './SystemInfoSettings';
 import { ModelDownload } from './ModelDownload';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface SettingsViewProps {
   activeSettingsTab: string;
@@ -13,13 +13,14 @@ export interface SettingsViewProps {
 }
 
 export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setActiveSettingsTab }) => {
+  const { t } = useLanguage();
+
   const tabs: NavTab[] = [
-    { id: 'asr', label: 'ASR Service', icon: Mic },
-    { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
-    { id: 'appearance', label: 'Appearance', icon: Palette },
-    { id: 'models', label: 'Whisper Models', icon: Download },
-    { id: 'advanced', label: 'Advanced', icon: Sliders },
-    { id: 'system', label: 'System', icon: Monitor },
+    { id: 'asr', label: t.asrService, icon: Mic },
+    { id: 'shortcuts', label: t.shortcuts, icon: Keyboard },
+    { id: 'models', label: t.whisperModels, icon: Download },
+    { id: 'advanced', label: t.advanced, icon: Sliders },
+    { id: 'system', label: t.system, icon: Monitor },
   ];
 
   return (
@@ -53,7 +54,6 @@ export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setAct
       <main className="flex-1 min-h-[500px] bg-white dark:bg-dark-surface rounded-xl p-6 border border-gray-200 dark:border-dark-border">
         {activeSettingsTab === 'asr' && <ASRSettings />}
         {activeSettingsTab === 'shortcuts' && <ShortcutSettings />}
-        {activeSettingsTab === 'appearance' && <AppearanceSettings />}
         {activeSettingsTab === 'models' && <ModelDownload />}
         {activeSettingsTab === 'advanced' && <AdvancedSettings />}
         {activeSettingsTab === 'system' && <SystemInfoSettings />}

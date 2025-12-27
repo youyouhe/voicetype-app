@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '../ui/Button';
 import { TauriService } from '../../services/tauriService';
+import type { HotkeyConfig } from '../../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface VoiceAssistantPanelProps {
   isRunning?: boolean;
@@ -11,10 +13,27 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
   isRunning: externalIsRunning,
   onStatusChange
 }) => {
+  const { t } = useLanguage();
   const [internalIsRunning, setInternalIsRunning] = useState(false);
+  const [hotkeyConfig, setHotkeyConfig] = useState<HotkeyConfig | null>(null);
 
   // Use external state if provided, otherwise use internal state
   const isRunning = externalIsRunning !== undefined ? externalIsRunning : internalIsRunning;
+
+  // Fetch hotkey config on mount
+  useEffect(() => {
+    const fetchHotkeyConfig = async () => {
+      try {
+        const config = await TauriService.getHotkeyConfig();
+        console.log('📥 VoiceAssistantPanel - Loaded hotkey config:', config);
+        setHotkeyConfig(config);
+      } catch (error) {
+        console.error('❌ VoiceAssistantPanel - Failed to load hotkey config:', error);
+      }
+    };
+
+    fetchHotkeyConfig();
+  }, []);
 
   // Update internal state only if we don't have external control
   const setIsRunning = (running: boolean) => {
@@ -107,21 +126,21 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-lg shadow-gray-200/50 p-6 mb-8 border border-white">
-      <h3 className="text-lg font-bold text-gray-900 mb-4">🎤 Voice Assistant Status</h3>
+    <div className="bg-white dark:bg-dark-surface rounded-2xl shadow-lg shadow-gray-200/50 dark:shadow-black/20 p-6 mb-8 border border-white dark:border-dark-border">
+      <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-4">🎤 {t.voiceAssistantStatus}</h3>
 
       {/* Status Display */}
-      <div className="p-4 bg-gray-50 rounded-lg">
+      <div className="p-4 bg-gray-50 dark:bg-slate-800 rounded-lg">
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Service Status:</span>
-          <span className={`text-sm font-bold ${isRunning ? 'text-green-600' : 'text-gray-600'}`}>
-            {isRunning ? '🟢 Active' : '⚪ Inactive'}
+          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{t.serviceStatusText}</span>
+          <span className={`text-sm font-bold ${isRunning ? 'text-green-600 dark:text-green-400' : 'text-gray-600 dark:text-gray-400'}`}>
+            {isRunning ? `🟢 ${t.activeText}` : `⚪ ${t.inactiveText}`}
           </span>
         </div>
-        <div className="mt-2 text-xs text-gray-500">
+        <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {isRunning
-            ? 'Voice Assistant is running and listening for hotkeys (F4, Shift+F4)'
-            : 'Use the Start button in the top bar to activate Voice Assistant'}
+            ? t.runningListening(hotkeyConfig?.transcribe_key || 'F4', hotkeyConfig?.translate_key || 'Shift+F4')
+            : t.useStartButton}
         </div>
       </div>
     </div>

@@ -2,8 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { Monitor, Cpu, HardDrive, Wifi, Zap, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { TauriService } from '../../services/tauriService';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 export const SystemInfoSettings = () => {
+  const { t } = useLanguage();
+
   const [systemInfo, setSystemInfo] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
 
@@ -77,9 +80,9 @@ export const SystemInfoSettings = () => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">💻 System Information</h2>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-dark-text">{t.systemInformationWithIcon}</h2>
           <p className="text-gray-500 dark:text-dark-muted mt-1">
-            Monitor your system status and Voice Assistant configuration
+            {t.monitorSystemStatus}
           </p>
         </div>
         <Button
@@ -89,7 +92,7 @@ export const SystemInfoSettings = () => {
           disabled={isLoading}
           icon={<RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />}
         >
-          Refresh
+          {t.refresh}
         </Button>
       </div>
 
@@ -97,7 +100,7 @@ export const SystemInfoSettings = () => {
       <div className="bg-white dark:bg-dark-surface rounded-xl p-6 border border-gray-200 dark:border-dark-border">
         <div className="flex items-center mb-4">
           <Monitor className="w-5 h-5 text-primary-500 mr-2" />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text">System Status</h3>
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-dark-text">{t.systemStatusCard}</h3>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -116,28 +119,28 @@ export const SystemInfoSettings = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* System Information */}
         {infoGroups.system.length > 0 && renderInfoCard(
-          'System Information',
+          t.systemInfo,
           <Monitor className="w-5 h-5" />,
           infoGroups.system
         )}
 
         {/* Hardware Information */}
         {infoGroups.hardware.length > 0 && renderInfoCard(
-          'Hardware Information',
+          t.hardwareInformation,
           <HardDrive className="w-5 h-5" />,
           infoGroups.hardware
         )}
 
         {/* Software Information */}
         {infoGroups.software.length > 0 && renderInfoCard(
-          'Software Information',
+          t.softwareInformation,
           <Cpu className="w-5 h-5" />,
           infoGroups.software
         )}
 
         {/* Status Information */}
         {infoGroups.status.length > 0 && renderInfoCard(
-          'Voice Assistant Status',
+          t.voiceAssistantStatusCard,
           <Zap className="w-5 h-5" />,
           infoGroups.status
         )}
@@ -147,12 +150,12 @@ export const SystemInfoSettings = () => {
       {Object.keys(systemInfo).length === 0 && !isLoading && (
         <div className="text-center py-12 bg-gray-50 dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border">
           <Monitor className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 dark:text-dark-text mb-2">No System Information</h3>
+          <h3 className="text-lg font-medium text-gray-900 dark:text-dark-text mb-2">{t.noSystemInformation}</h3>
           <p className="text-gray-500 dark:text-dark-muted mb-4">
-            Unable to retrieve system information. Make sure Voice Assistant is running in Tauri mode.
+            {t.unableToRetrieveSystemInfo}
           </p>
           <Button onClick={loadSystemInfo} disabled={isLoading}>
-            {isLoading ? 'Loading...' : 'Retry'}
+            {isLoading ? t.loading : t.retrySystemInfo}
           </Button>
         </div>
       )}

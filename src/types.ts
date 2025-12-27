@@ -47,9 +47,9 @@ export interface MetricData {
 
 export interface HistoryItem {
   id: string;
-  type: 'transcribe' | 'translate';
+  type: 'transcribe' | 'translate' | 'asr';  // Added 'asr' type
   text: string;
-  timestamp: number;
+  timestamp: Date;  // Changed from number to Date
 }
 
 export interface HotkeyConfig {

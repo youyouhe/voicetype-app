@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Server, Zap, BarChart3, ArrowUpRight, AlertCircle } from 'lucide-react';
 import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 import { TauriService } from '../../services/tauriService';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 interface InfoCardProps {
   icon: React.ReactNode;
@@ -14,9 +15,9 @@ interface InfoCardProps {
 }
 
 const InfoCard: React.FC<InfoCardProps> = ({ icon, title, value, subValue, chart, chartData }) => (
-  <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex flex-col justify-between h-40 hover:shadow-md transition-shadow">
+  <div className="bg-white dark:bg-dark-surface rounded-xl shadow-sm border border-gray-100 dark:border-dark-border p-5 flex flex-col justify-between h-40 hover:shadow-md transition-shadow">
     <div className="flex justify-between items-start">
-      <div className="p-2 bg-gray-50 rounded-lg text-gray-600">
+      <div className="p-2 bg-gray-50 dark:bg-slate-800 rounded-lg text-gray-600 dark:text-gray-400">
         {icon}
       </div>
       {chart && chartData && (
@@ -30,9 +31,9 @@ const InfoCard: React.FC<InfoCardProps> = ({ icon, title, value, subValue, chart
       )}
     </div>
     <div className="mt-4">
-      <p className="text-sm font-medium text-gray-500">{title}</p>
+      <p className="text-sm font-medium text-gray-500 dark:text-gray-400">{title}</p>
       <div className="flex items-baseline space-x-2 mt-1">
-        <h3 className="text-2xl font-bold text-gray-900">{value}</h3>
+        <h3 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{value}</h3>
         {subValue}
       </div>
     </div>
@@ -40,6 +41,7 @@ const InfoCard: React.FC<InfoCardProps> = ({ icon, title, value, subValue, chart
 );
 
 export const LiveData: React.FC = () => {
+  const { t } = useLanguage();
   const [serviceStatus, setServiceStatus] = useState<TauriService.ServiceStatus | null>(null);
   const [latencyData, setLatencyData] = useState<TauriService.LatencyData | null>(null);
   const [usageData, setUsageData] = useState<TauriService.UsageData | null>(null);
@@ -56,6 +58,7 @@ export const LiveData: React.FC = () => {
         TauriService.getUsageData()
       ]);
 
+      console.log('📊 [LiveData] Received data:', { service, latency, usage });
       setServiceStatus(service);
       setLatencyData(latency);
       setUsageData(usage);
@@ -124,13 +127,13 @@ export const LiveData: React.FC = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'online':
-        return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">Online</span>;
+        return <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700">{t.online}</span>;
       case 'offline':
-        return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">Offline</span>;
+        return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{t.offline}</span>;
       case 'error':
-        return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">Error</span>;
+        return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">{t.error}</span>;
       default:
-        return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">Unknown</span>;
+        return <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{t.unknown}</span>;
     }
   };
 
@@ -147,14 +150,14 @@ export const LiveData: React.FC = () => {
     return (
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
         {[1, 2, 3].map((i) => (
-          <div key={i} className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 flex flex-col justify-between h-40 animate-pulse">
+          <div key={i} className="bg-white dark:bg-dark-surface rounded-xl shadow-sm border border-gray-100 dark:border-dark-border p-5 flex flex-col justify-between h-40 animate-pulse">
             <div className="flex justify-between items-start">
-              <div className="w-9 h-9 bg-gray-200 rounded-lg" />
-              {i === 2 && <div className="w-24 h-10 bg-gray-200 rounded" />}
+              <div className="w-9 h-9 bg-gray-200 dark:bg-slate-700 rounded-lg" />
+              {i === 2 && <div className="w-24 h-10 bg-gray-200 dark:bg-slate-700 rounded" />}
             </div>
             <div className="mt-4">
-              <div className="w-20 h-4 bg-gray-200 rounded mb-2" />
-              <div className="w-16 h-6 bg-gray-200 rounded" />
+              <div className="w-20 h-4 bg-gray-200 dark:bg-slate-700 rounded mb-2" />
+              <div className="w-16 h-6 bg-gray-200 dark:bg-slate-700 rounded" />
             </div>
           </div>
         ))}
@@ -167,7 +170,7 @@ export const LiveData: React.FC = () => {
       <div className="bg-red-50 border border-red-200 rounded-xl p-6 w-full">
         <div className="flex items-center space-x-3">
           <AlertCircle className="w-5 h-5 text-red-600" />
-          <p className="text-red-800 font-medium">Live data unavailable</p>
+          <p className="text-red-800 font-medium">{t.liveDataUnavailable}</p>
         </div>
         <p className="text-red-600 text-sm mt-2">{error}</p>
       </div>
@@ -178,39 +181,43 @@ export const LiveData: React.FC = () => {
     <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
       <InfoCard
         icon={<Server className="w-5 h-5" />}
-        title="Active Service"
-        value={serviceStatus?.active_service || 'Unknown'}
-        subValue={serviceStatus ? getStatusBadge(serviceStatus.status) : <span className="text-xs text-gray-500">Loading...</span>}
+        title={t.activeService}
+        value={serviceStatus?.active_service || t.unknown}
+        subValue={serviceStatus ? getStatusBadge(serviceStatus.status) : <span className="text-xs text-gray-500">{t.loading}</span>}
       />
 
       <InfoCard
         icon={<Zap className="w-5 h-5" />}
-        title="Avg Latency"
-        value={latencyData ? `${latencyData.current}ms` : '--'}
+        title={t.lastLatency}
+        value={
+          latencyData && latencyData.current > 0
+            ? `${latencyData.current}ms`
+            : '--'
+        }
         subValue={
-          latencyData ? (
+          latencyData && latencyData.current > 0 ? (
             <span className="text-xs text-gray-400 flex items-center">
               {getTrendIcon(latencyData.trend, latencyData.trend_value)}
               {latencyData.trend_value > 0 ? '+' : ''}{latencyData.trend_value}ms
             </span>
           ) : (
-            <span className="text-xs text-gray-500">No data</span>
+            <span className="text-xs text-gray-500">{t.noRecordingsYet}</span>
           )
         }
-        chart
+        chart={!!(latencyData && latencyData.current > 0)}
         chartData={latencyData?.history}
       />
 
       <InfoCard
         icon={<BarChart3 className="w-5 h-5" />}
-        title="Today's Usage"
-        value={usageData ? `${usageData.today_seconds} secs` : '--'}
+        title={t.todaysUsage}
+        value={usageData ? `${usageData.today_seconds} ${t.secs}` : '--'}
         subValue={usageData ? (
           <span className="text-xs text-gray-500">
-            {usageData.success_rate}% Success ({usageData.successful_requests}/{usageData.total_requests})
+            {usageData.success_rate}% {t.success} ({usageData.successful_requests}/{usageData.total_requests})
           </span>
         ) : (
-          <span className="text-xs text-gray-500">No data</span>
+          <span className="text-xs text-gray-500">{t.noData}</span>
         )}
       />
     </div>

@@ -65,39 +65,26 @@ impl ModelManager {
     }
 
     fn initialize_models(&mut self) {
-        // Define available models
+        // Define available models - only turbo and v2
+        // size_mb will be updated to actual file size if downloaded, otherwise use estimate
         self.models = vec![
             WhisperModel::new(
-                "large-v3",
-                "Large v3",
-                "ggml-large-v3.bin",
-                2950.0,
-                "大型模型，最高精度，适合对准确性要求极高的场景"
-            ),
-            WhisperModel::new(
                 "large-v3-turbo",
-                "Large v3 Turbo",
+                "Turbo",
                 "ggml-large-v3-turbo.bin",
-                1570.0,
+                0.0, // Will be updated from actual file or estimate
                 "最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用"
             ),
             WhisperModel::new(
-                "small",
-                "Small",
-                "ggml-small.bin",
-                467.0,
-                "小型模型，平衡了速度和准确性，适合日常使用"
-            ),
-            WhisperModel::new(
-                "vad",
-                "Voice Activity Detection",
-                "ggml-vad.bin",
-                1.0,
-                "语音活动检测模型，用于识别音频中的语音片段，提升语音识别准确性"
+                "large-v2",
+                "V2",
+                "ggml-large-v2.bin",
+                0.0, // Will be updated from actual file or estimate
+                "成熟稳定的模型，具有良好的准确性和兼容性"
             ),
         ];
 
-        // Check which models are already downloaded
+        // Check which models are already downloaded and get actual sizes
         self.check_downloaded_models();
     }
 
@@ -108,6 +95,21 @@ impl ModelManager {
                 model.is_downloaded = true;
                 model.file_path = Some(model_path.to_string_lossy().to_string());
                 model.download_progress = 100.0;
+
+                // Get actual file size in MB
+                if let Ok(metadata) = fs::metadata(&model_path) {
+                    let file_size_bytes = metadata.len();
+                    model.size_mb = file_size_bytes as f64 / (1024.0 * 1024.0);
+                    println!("✅ Actual file size for {}: {:.2} MB", model.name, model.size_mb);
+                }
+            } else {
+                // Use estimated size for non-downloaded models
+                model.size_mb = match model.name.as_str() {
+                    "large-v3-turbo" => 1570.0,
+                    "large-v2" => 1550.0,
+                    _ => 0.0,
+                };
+                println!("ℹ️ Using estimated size for {}: {:.2} MB", model.name, model.size_mb);
             }
         }
     }
@@ -320,6 +322,41 @@ impl ModelManager {
         // Set environment variable
         std::env::set_var("WHISPER_MODEL_PATH", &model.file_path.as_ref().unwrap());
 
+        // 🔥 NEW: 预加载模型到GPU
+        println!("🚀 Pre-loading model '{}' to GPU...", model_name);
+        let model_path = model.file_path.as_ref().unwrap();
+
+        // 启动异步任务预加载模型
+        let app_handle = self.app_handle.clone();
+        let model_name_clone = model_name.to_string();
+        let model_path_clone = model_path.to_string();
+
+        tokio::spawn(async move {
+            match crate::voice_assistant::global_whisper::get_or_create_whisper_processor(&model_path_clone).await {
+                Ok(_) => {
+                    println!("✅ Model '{}' pre-loaded to GPU successfully", model_name_clone);
+                    // 发送预加载成功事件
+                    let _ = app_handle.emit("model-preloaded",
+                        serde_json::json!({
+                            "model": model_name_clone,
+                            "status": "success"
+                        })
+                    );
+                }
+                Err(e) => {
+                    println!("❌ Failed to pre-load model '{}' to GPU: {}", model_name_clone, e);
+                    // 发送预加载失败事件
+                    let _ = app_handle.emit("model-preloaded",
+                        serde_json::json!({
+                            "model": model_name_clone,
+                            "status": "error",
+                            "error": e.to_string()
+                        })
+                    );
+                }
+            }
+        });
+
         // Emit active model change event
         self.emit_active_model_changed(model_name);
 
@@ -398,17 +435,8 @@ pub async fn get_available_models(app_handle: AppHandle) -> Result<Vec<WhisperMo
             e.to_string()
         })?;
 
-    let mut models = manager.get_models();
-    
-    // Filter out VAD model from the list to prevent users from selecting it
-    let original_count = models.len();
-    models.retain(|model| !model.name.contains("vad"));
-    
-    if models.len() < original_count {
-        println!("⚠️ Filtered out VAD model(s) from available models list");
-        println!("📋 Original models count: {}, Filtered models count: {}", original_count, models.len());
-    }
-    
+    let models = manager.get_models();
+
     println!("📋 Available models count: {}", models.len());
     for model in &models {
         println!("  - {}: {} ({} MB) - Downloaded: {}",
@@ -471,4 +499,36 @@ pub async fn get_model_stats(app_handle: AppHandle) -> Result<serde_json::Value,
     let manager = ModelManager::new(app_handle)
         .map_err(|e| e.to_string())?;
     Ok(manager.get_model_stats())
+}
+
+/// 🔥 NEW: 检查指定模型是否已预加载到GPU
+#[tauri::command]
+pub async fn check_model_loaded(model_name: String) -> Result<bool, String> {
+    // 从ASR配置中获取当前活动模型
+    let db = crate::database::Database::new()
+        .await
+        .map_err(|e| format!("Failed to initialize database: {}", e))?;
+
+    let asr_config = db.get_asr_config()
+        .await
+        .map_err(|e| format!("Failed to get ASR config: {}", e))?;
+
+    if let Some(config) = asr_config {
+        if config.whisper_model.as_ref() == Some(&model_name) {
+            // 检查全局WhisperRS管理器中的模型状态
+            let status = crate::voice_assistant::global_whisper::get_global_whisper_status().await;
+            let has_processor = status.get("has_processor").and_then(|v| v.as_bool()).unwrap_or(false);
+            let current_model_path = status.get("current_model_path").and_then(|v| v.as_str());
+
+            // 检查是否匹配对应的模型文件路径
+            if let Some(path) = current_model_path {
+                let is_matching = path.contains(&format!("ggml-{}.bin", model_name));
+                return Ok(has_processor && is_matching);
+            }
+
+            return Ok(has_processor);
+        }
+    }
+
+    Ok(false)
 }

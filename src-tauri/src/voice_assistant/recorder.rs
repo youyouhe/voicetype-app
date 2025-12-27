@@ -23,13 +23,16 @@ impl AudioRecorder {
         let device = host.default_input_device()
             .ok_or_else(|| VoiceError::Audio("No default input device found".to_string()))?;
 
-        // 强制使用44100Hz采样率，匹配目标WAV文件格式
-        let sample_rate = 44100;
-        println!("AudioRecorder initialized: device={:?}, sample_rate={}", device.name(), sample_rate);
+        // 获取硬件支持的实际配置，不要强制使用特定采样率
+        let config = device.default_input_config()
+            .map_err(|e| VoiceError::Audio(format!("Failed to get input config: {}", e)))?;
+
+        let sample_rate = config.sample_rate();
+        println!("AudioRecorder initialized: device={:?}, hardware_sample_rate={:?}", device.name(), sample_rate);
 
         Ok(Self {
             recording: false,
-            sample_rate,
+            sample_rate: sample_rate.0,
             min_duration_secs: 1.0,
             record_start_time: None,
             audio_data: Vec::new(),
@@ -52,63 +55,101 @@ impl AudioRecorder {
         let config = device.default_input_config()
             .map_err(|e| VoiceError::Audio(format!("Failed to get input config: {}", e)))?;
 
-        let channels = config.channels();
-        // 强制使用44100Hz采样率，匹配目标WAV文件格式
-        let sample_rate = cpal::SampleRate(44100);
+        let hardware_channels = config.channels();
+        // 使用硬件支持的通道数，不强制改变
+        let channels = hardware_channels;
+        // 使用硬件的实际采样率
+        let sample_rate = config.sample_rate();
 
         let stream_config = StreamConfig {
             channels,
             sample_rate,
-            buffer_size: cpal::BufferSize::Default,
+            buffer_size: cpal::BufferSize::Fixed(512), // 使用固定缓冲区大小
         };
-        
-        println!("🎙️ Stream Config: channels={}, sample_rate={:?}, sample_format={:?}", 
+
+        println!("🎙️ Stream Config: channels={}, sample_rate={:?}, sample_format={:?}",
             channels, sample_rate, config.sample_format());
+        println!("🔧 Hardware supports {} channels, requesting {} channels", hardware_channels, channels);
+
+        if hardware_channels > 1 {
+            println!("📝 Note: Will convert {} hardware channels to mono for speech recognition", hardware_channels);
+        }
 
         println!("Starting recording on device: {:?}, config: {:?}", device.name(), config);
 
         let audio_data = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let audio_data_clone = audio_data.clone();
 
+        let hardware_channels = hardware_channels; // 用于闭包的副本
+
         let stream = match config.sample_format() {
             SampleFormat::F32 => device.build_input_stream(
                 &stream_config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                    // 在这里进行多声道到单声道的转换
+                    let samples: Vec<f32> = if hardware_channels == 1 {
+                        data.to_vec() // 已经是单声道
+                    } else {
+                        // 多声道转单声道：取左声道（最适合语音识别）
+                        data.chunks(hardware_channels as usize)
+                            .map(|chunk| chunk[0]) // 取左声道
+                            .collect()
+                    };
                     if let Ok(mut buffer) = audio_data_clone.lock() {
-                        buffer.extend_from_slice(data);
+                        buffer.extend_from_slice(&samples);
                     }
                 },
                 |err| eprintln!("Error in input stream: {}", err),
                 None,
             ).map_err(|e| VoiceError::Audio(format!("Failed to build f32 stream: {}", e)))?,
 
-            SampleFormat::I16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                    let samples: Vec<f32> = data.iter()
-                        .map(|&sample| f32::from(sample) / i16::MAX as f32)
-                        .collect();
-                    if let Ok(mut buffer) = audio_data_clone.lock() {
-                        buffer.extend_from_slice(&samples);
-                    }
-                },
-                |err| eprintln!("Error in input stream: {}", err),
-                None,
-            ).map_err(|e| VoiceError::Audio(format!("Failed to build i16 stream: {}", e)))?,
+            SampleFormat::I16 => {
+                let hardware_channels = hardware_channels; // 再次复制
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                        let samples: Vec<f32> = if hardware_channels == 1 {
+                            data.iter()
+                                .map(|&sample| f32::from(sample) / i16::MAX as f32)
+                                .collect()
+                        } else {
+                            // 多声道转单声道：取左声道
+                            data.chunks(hardware_channels as usize)
+                                .map(|chunk| f32::from(chunk[0]) / i16::MAX as f32)
+                                .collect()
+                        };
+                        if let Ok(mut buffer) = audio_data_clone.lock() {
+                            buffer.extend_from_slice(&samples);
+                        }
+                    },
+                    |err| eprintln!("Error in input stream: {}", err),
+                    None,
+                ).map_err(|e| VoiceError::Audio(format!("Failed to build i16 stream: {}", e)))?
+            },
 
-            SampleFormat::U16 => device.build_input_stream(
-                &stream_config,
-                move |data: &[u16], _: &cpal::InputCallbackInfo| {
-                    let samples: Vec<f32> = data.iter()
-                        .map(|&sample| (f32::from(sample) - u16::MAX as f32) / u16::MAX as f32)
-                        .collect();
-                    if let Ok(mut buffer) = audio_data_clone.lock() {
-                        buffer.extend_from_slice(&samples);
-                    }
-                },
-                |err| eprintln!("Error in input stream: {}", err),
-                None,
-            ).map_err(|e| VoiceError::Audio(format!("Failed to build u16 stream: {}", e)))?,
+            SampleFormat::U16 => {
+                let hardware_channels = hardware_channels; // 再次复制
+                device.build_input_stream(
+                    &stream_config,
+                    move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                        let samples: Vec<f32> = if hardware_channels == 1 {
+                            data.iter()
+                                .map(|&sample| (f32::from(sample) - u16::MAX as f32) / u16::MAX as f32)
+                                .collect()
+                        } else {
+                            // 多声道转单声道：取左声道
+                            data.chunks(hardware_channels as usize)
+                                .map(|chunk| (f32::from(chunk[0]) - u16::MAX as f32) / u16::MAX as f32)
+                                .collect()
+                        };
+                        if let Ok(mut buffer) = audio_data_clone.lock() {
+                            buffer.extend_from_slice(&samples);
+                        }
+                    },
+                    |err| eprintln!("Error in input stream: {}", err),
+                    None,
+                ).map_err(|e| VoiceError::Audio(format!("Failed to build u16 stream: {}", e)))?
+            },
 
             _ => return Err(VoiceError::Audio("Unsupported sample format".to_string())),
         };
@@ -178,9 +219,9 @@ impl AudioRecorder {
     }
 
     fn audio_to_wav(&self, samples: &[f32]) -> Result<Vec<u8>, VoiceError> {
-        // 🎯 保存为2通道，匹配你的模拟文件格式
+        // 🎯 保存为单声道，适合语音识别
         let spec = WavSpec {
-            channels: 2, // 2通道，与你的模拟文件一致
+            channels: 1, // 单声道，适合语音识别
             sample_rate: self.sample_rate,
             bits_per_sample: 16, // 16位有符号整数 (s16le)
             sample_format: hound::SampleFormat::Int,

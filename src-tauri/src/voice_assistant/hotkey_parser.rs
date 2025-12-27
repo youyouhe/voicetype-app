@@ -201,14 +201,20 @@ impl ParsedHotkey {
 
     /// 检查当前按键状态是否匹配此热键
     pub fn matches(&self, pressed_keys: &HashSet<Key>) -> bool {
-        // 检查所有必需的按键是否都被按下
+        // 1. 检查所有必需的按键是否都被按下
         for required_key in &self.key_combination {
             if !pressed_keys.contains(required_key) {
                 return false;
             }
         }
 
-        // 所有必需的按键都找到了
+        // 2. 检查是否有额外的按键被按下（精确匹配）
+        // 热键只匹配精确的按键组合，不允许额外按键
+        if pressed_keys.len() != self.key_combination.len() {
+            return false;
+        }
+
+        // 所有必需的按键都找到了，且没有额外按键
         true
     }
 

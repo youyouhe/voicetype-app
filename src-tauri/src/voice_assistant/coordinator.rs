@@ -199,7 +199,7 @@ impl Default for VoiceAssistantConfig {
     fn default() -> Self {
         Self {
             service_platform: std::env::var("SERVICE_PLATFORM").unwrap_or_else(|_| "siliconflow".to_string()),
-            asr_processor: ProcessorType::CloudASR,
+            asr_processor: ProcessorType::WhisperRS, // 🔥 改为默认使用本地WhisperRS
             translate_processor: TranslateType::Ollama,
             convert_to_simplified: std::env::var("CONVERT_TO_SIMPLIFIED")
                 .unwrap_or_else(|_| "true".to_string())
@@ -219,7 +219,7 @@ impl Default for VoiceAssistantConfig {
 
 pub struct VoiceAssistant {
     config: VoiceAssistantConfig,
-    asr_processor: Arc<dyn AsrProcessor + Send + Sync>,
+    asr_processor: Option<Arc<dyn AsrProcessor + Send + Sync>>,
     translate_processor: Option<Arc<dyn TranslateProcessor + Send + Sync>>,
     keyboard_manager: Arc<Mutex<KeyboardManager>>,
     recorder: Arc<Mutex<AudioRecorder>>,
@@ -291,28 +291,48 @@ impl VoiceAssistant {
                         }
                     })
                     .or_else(|| {
-                        // Try to find models in the default data directory, preferring smaller models for CPU
+                        // Try to find models in the default data directory
                         let models_dir = crate::utils::platform::get_models_dir();
+                        println!("🔍 Searching for models in: {}", models_dir.display());
 
-                        // Try different models in order of preference
+                        // Try different models in order of preference (添加 large-v2)
                         let model_preferences = [
-                            "ggml-large-v3-turbo.bin", // ~1570MB - highest quality
-                            "ggml-small.bin",          // ~244MB - most stable for CPU
+                            "ggml-large-v2.bin",         // 🔥 用户选择的模型
+                            "ggml-large-v3-turbo.bin",     // ~1570MB - highest quality
+                            "ggml-large-v3.bin",          // ~2950MB - v3模型
+                            "ggml-small.bin",             // ~467MB - 平衡
+                            "ggml-base.bin",              // ~148MB - 最快
                         ];
 
                         for model in model_preferences {
                             let model_file = models_dir.join(model);
                             if model_file.exists() {
-                                println!("✅ Found CPU-optimized model: {} ({}MB)",
+                                println!("✅ Found model: {} ({}MB)",
                                         model,
                                         match model {
+                                            "ggml-large-v2.bin" => "1550",
                                             "ggml-large-v3-turbo.bin" => "1570",
-                                            "ggml-small.bin" => "244",
+                                            "ggml-large-v3.bin" => "2950",
+                                            "ggml-small.bin" => "467",
+                                            "ggml-base.bin" => "148",
                                             _ => "unknown",
                                         });
                                 return Some(model_file.to_string_lossy().to_string());
                             }
                         }
+
+                        // 如果上述模型都没找到，列出目录中的所有.bin文件
+                        println!("⚠️ No preferred models found, searching for any .bin files...");
+                        if let Ok(entries) = std::fs::read_dir(&models_dir) {
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                                    println!("✅ Found alternative model: {}", path.display());
+                                    return Some(path.to_string_lossy().to_string());
+                                }
+                            }
+                        }
+
                         None
                     })
                     .unwrap_or_else(|| {
@@ -340,14 +360,15 @@ impl VoiceAssistant {
                             let _ = tx.send(result);
                         });
                         
-                        // Wait for up to 30 seconds for processor creation
-                        match rx.recv_timeout(std::time::Duration::from_secs(30)) {
+                        // Wait for up to 180 seconds (3 minutes) for processor creation - large models need more time
+                        match rx.recv_timeout(std::time::Duration::from_secs(180)) {
                             Ok(processor_result) => processor_result,
                             Err(_) => {
-                                eprintln!("⏰ WhisperRSProcessor creation timed out after 30 seconds");
+                                eprintln!("⏰ WhisperRSProcessor creation timed out after 180 seconds");
                                 eprintln!("💡 This indicates a deadlock or infinite loop in whisper.cpp");
+                                eprintln!("💡 Or the model is very large and needs even more time to load");
                                 Err(crate::voice_assistant::VoiceError::Other(
-                                    "WhisperRSProcessor creation timeout - possible whisper.cpp bug".to_string()
+                                    "WhisperRSProcessor creation timeout".to_string()
                                 ))
                             }
                         }
@@ -482,7 +503,7 @@ impl VoiceAssistant {
 
         Ok(Self {
             config,
-            asr_processor,
+            asr_processor: Some(asr_processor),
             translate_processor,
             keyboard_manager,
             recorder,
@@ -539,28 +560,54 @@ impl VoiceAssistant {
                         }
                     })
                     .or_else(|| {
-                        // Try to find the model in the default data directory
+                        // 🔥 搜索模型目录，按优先级查找
                         let models_dir = crate::utils::platform::get_models_dir();
-                        let model_file = models_dir.join("ggml-large-v3-turbo.bin");
-                        if model_file.exists() {
-                            Some(model_file.to_string_lossy().to_string())
-                        } else {
-                            None
+                        println!("🔍 Searching for models in: {}", models_dir.display());
+
+                        // Try different models in order of preference
+                        let model_preferences = [
+                            "ggml-large-v2.bin",         // 🔥 用户选择的模型
+                            "ggml-large-v3-turbo.bin",     // ~1570MB
+                            "ggml-large-v3.bin",          // ~2950MB
+                            "ggml-small.bin",             // ~467MB
+                            "ggml-base.bin",              // ~148MB
+                        ];
+
+                        for model in model_preferences {
+                            let model_file = models_dir.join(model);
+                            if model_file.exists() {
+                                println!("✅ Found model: {}", model);
+                                return Some(model_file.to_string_lossy().to_string());
+                            }
                         }
+
+                        // 如果上述模型都没找到，扫描所有.bin文件
+                        println!("⚠️ No preferred models found, searching for any .bin files...");
+                        if let Ok(entries) = std::fs::read_dir(&models_dir) {
+                            for entry in entries.flatten() {
+                                let path = entry.path();
+                                if path.extension().and_then(|s| s.to_str()) == Some("bin") {
+                                    println!("✅ Found alternative model: {}", path.display());
+                                    return Some(path.to_string_lossy().to_string());
+                                }
+                            }
+                        }
+
+                        None
                     })
-                    .unwrap_or_else(|| {
-                        println!("⚠️ Whisper model not found. Please download ggml-large-v3-turbo.bin to {}/ or set WHISPER_MODEL_PATH", crate::utils::platform::get_models_dir().display());
-                        "./models/ggml-large-v3-turbo.bin".to_string()
-                    });
+                    .ok_or_else(|| {
+                        println!("⚠️ Whisper model not found. Please download a model to {}/", crate::utils::platform::get_models_dir().display());
+                        VoiceError::Other("Whisper model not found".to_string())
+                    })?;
 
                 println!("🎯 Using Whisper model: {}", model_path);
 
                 Arc::new(crate::voice_assistant::asr::whisper_rs::WhisperRSProcessor::with_model_path(&model_path)?)
             },
         };
-        self.asr_processor = new_asr_processor;
+        self.asr_processor = Some(new_asr_processor);
         println!("✅ ASR processor refreshed");
-        
+
         // 3. 刷新翻译处理器
         let new_translate_processor: Option<Arc<dyn TranslateProcessor + Send + Sync>> = match self.config.translate_processor {
             TranslateType::SiliconFlow => {
@@ -574,11 +621,11 @@ impl VoiceAssistant {
         };
         self.translate_processor = new_translate_processor;
         println!("✅ Translation processor refreshed");
-        
+
         // 4. 更新键盘管理器的处理器引用
         if let Ok(mut keyboard_manager) = self.keyboard_manager.lock() {
             keyboard_manager.update_processors(
-                self.asr_processor.clone(), 
+                self.asr_processor.clone(),
                 self.translate_processor.clone()
             )?;
             println!("✅ Keyboard manager processors updated");
@@ -668,10 +715,13 @@ impl VoiceAssistant {
 
     pub fn stop(&mut self) -> Result<(), VoiceError> {
         info!("Stopping VoiceAssistant");
-        
+
         // Reset keyboard manager state
         if let Ok(mut keyboard_manager) = self.keyboard_manager.lock() {
             keyboard_manager.reset_state();
+            // 🔥 重要：也清除 KeyboardManager 中持有的处理器引用
+            // 这样才能让 Arc 的引用计数降为 0，真正释放模型
+            keyboard_manager.clear_processors();
         }
 
         // Reset any active recording
@@ -679,6 +729,20 @@ impl VoiceAssistant {
             if recorder.is_recording() {
                 let _ = recorder.stop_recording();
             }
+        }
+
+        // 🔥 显式释放 ASR 处理器以卸载模型并释放内存
+        if self.asr_processor.is_some() {
+            info!("🗑️ Unloading ASR model to free memory...");
+            self.asr_processor = None;
+            info!("✅ ASR model unloaded successfully");
+        }
+
+        // 🔥 显式释放翻译处理器
+        if self.translate_processor.is_some() {
+            info!("🗑️ Unloading translation processor to free memory...");
+            self.translate_processor = None;
+            info!("✅ Translation processor unloaded successfully");
         }
 
         *self.state.lock().unwrap() = InputState::Idle;
@@ -743,12 +807,13 @@ impl VoiceAssistant {
         // Determine ASR processor type from database config
         let asr_processor = if let Some(asr_config) = asr_configs.first() {
             match asr_config.service_provider.as_str() {
-                "local" => ProcessorType::LocalASR,
+                "local" => ProcessorType::WhisperRS, // 🔥 改为使用本地WhisperRS而不是HTTP API
                 "cloud" => ProcessorType::CloudASR,
-                _ => ProcessorType::LocalASR,
+                "whisper-rs" => ProcessorType::WhisperRS, // 显式支持whisper-rs
+                _ => ProcessorType::WhisperRS, // 默认使用WhisperRS
             }
         } else {
-            ProcessorType::LocalASR
+            ProcessorType::WhisperRS // 🔥 默认使用WhisperRS
         };
 
         // Determine translate processor type from database config
@@ -809,7 +874,8 @@ impl VoiceAssistant {
 
         // Process with ASR
         let prompt_str = prompt.unwrap_or("");
-        let result = self.asr_processor.process_audio(audio_cursor, mode, prompt_str)?;
+        let asr = self.asr_processor.as_ref().ok_or_else(|| VoiceError::Other("ASR processor not available".to_string()))?;
+        let result = asr.process_audio(audio_cursor, mode, prompt_str)?;
 
         info!("Audio processing completed, result length: {}", result.len());
         Ok(result)

@@ -44,8 +44,13 @@ pub trait AsrProcessor {
         mode: Mode,
         prompt: &str,
     ) -> Result<String, VoiceError>;
-    
+
     fn get_processor_type(&self) -> Option<&str>;
+
+    /// 显式卸载模型并释放GPU内存
+    fn unload(&mut self) {
+        // 默认实现：什么都不做
+    }
 }
 
 pub trait TranslateProcessor {

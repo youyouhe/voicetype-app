@@ -5,6 +5,7 @@ use uuid::Uuid;
 use tracing::info;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
+use std::sync::OnceLock;
 
 // Database models
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
@@ -15,6 +16,7 @@ pub struct AsrConfig {
     pub local_api_key: Option<String>,
     pub cloud_endpoint: Option<String>,
     pub cloud_api_key: Option<String>,
+    pub whisper_model: Option<String>, // 新增：选择的whisper模型
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -157,15 +159,36 @@ pub struct NewUsageLog {
     pub failed_requests: i64,
 }
 
+// 全局数据库连接池
+static GLOBAL_DB_POOL: OnceLock<Arc<Mutex<Option<SqlitePool>>>> = OnceLock::new();
+
 #[derive(Clone)]
 pub struct Database {
-    pool: SqlitePool,
+    pool: Arc<SqlitePool>,
 }
 
 impl Database {
     pub async fn new() -> Result<Self, sqlx::Error> {
         println!("🗄️ Database: Database::new() called");
-        
+
+        // 获取或创建全局连接池
+        let pool_guard = GLOBAL_DB_POOL.get_or_init(|| {
+            Arc::new(Mutex::new(None))
+        });
+
+        // 尝试获取现有连接池
+        {
+            let pool_option = pool_guard.lock().unwrap();
+            if let Some(ref pool) = *pool_option {
+                println!("📦 Database: Using existing global pool");
+                let db = Self { pool: Arc::new(pool.clone()) };
+                return Ok(db);
+            }
+        }
+
+        // 创建新连接池
+        println!("🏗️ Database: Creating new global database pool...");
+
         // Use a hidden directory to avoid triggering file watches
         let app_dir = std::env::current_dir().unwrap().join(".tauri-data");
         println!("📁 Database: App dir: {:?}", app_dir);
@@ -183,16 +206,26 @@ impl Database {
         info!("Initializing database at: {}", connection_string);
 
         println!("🔌 Database: Creating SQLite connection...");
-        let connect_options = SqliteConnectOptions::from_str(&connection_string)?
-            .create_if_missing(true);
+        let connect_options = SqliteConnectOptions::from_str(&connection_string)
+            .unwrap_or_else(|_| SqliteConnectOptions::new().filename(&db_path))
+            .create_if_missing(true)
+            .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal) // 使用WAL模式提升性能
+            .synchronous(sqlx::sqlite::SqliteSynchronous::Normal) // 适度同步
+            .busy_timeout(std::time::Duration::from_secs(30)); // 30秒超时
 
         println!("🏊 Database: Connecting to database pool...");
         let pool = SqlitePool::connect_with(connect_options).await?;
-        println!("✅ Database: Database pool connected successfully");
+        println!("✅ Database: Global database pool connected successfully");
 
-        // Run migrations
-        println!("🔄 Database: Creating database instance and running migrations...");
-        let db = Self { pool };
+        // 存储到全局变量
+        {
+            let mut pool_option = pool_guard.lock().unwrap();
+            *pool_option = Some(pool.clone());
+        }
+
+        let db = Self { pool: Arc::new(pool) };
+
+        // 运行迁移（只在第一次创建时）
         db.migrate().await?;
         println!("✅ Database: Migrations completed successfully");
 
@@ -212,13 +245,22 @@ impl Database {
                 local_api_key TEXT,
                 cloud_endpoint TEXT,
                 cloud_api_key TEXT,
+                whisper_model TEXT,
                 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
+
+        // 添加 whisper_model 列如果不存在（为现有数据库）
+        sqlx::query(
+            "ALTER TABLE asr_configs ADD COLUMN whisper_model TEXT"
+        )
+        .execute(&*self.pool)
+        .await
+        .ok(); // 忽略错误，如果列已存在
 
         // Create translation config table
         sqlx::query(
@@ -233,7 +275,7 @@ impl Database {
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Create history records table
@@ -253,16 +295,16 @@ impl Database {
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Create indexes for better query performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_history_type ON history_records(record_type)")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_history_created ON history_records(created_at)")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
 
         // Create hotkey configs table
@@ -280,7 +322,7 @@ impl Database {
             )
             "#,
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Add the save_wav_files column if it doesn't exist (for existing databases)
@@ -289,7 +331,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN save_wav_files BOOLEAN NOT NULL DEFAULT TRUE
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -298,7 +340,7 @@ impl Database {
         let column_exists = sqlx::query_scalar::<_, bool>(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('usage_logs') WHERE name = 'total_seconds'"
         )
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
         .await
         .unwrap_or(false);
 
@@ -309,7 +351,7 @@ impl Database {
             sqlx::query(
                 "ALTER TABLE usage_logs ADD COLUMN total_seconds INTEGER NOT NULL DEFAULT 0"
             )
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await
             .ok(); // Ignore error if column already exists
             
@@ -317,7 +359,7 @@ impl Database {
             sqlx::query(
                 "UPDATE usage_logs SET total_seconds = total_minutes * 60 WHERE total_minutes > 0"
             )
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await
             .ok();
             
@@ -330,7 +372,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN clipboard_update_ms INTEGER NOT NULL DEFAULT 100
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -339,7 +381,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN keyboard_events_settle_ms INTEGER NOT NULL DEFAULT 300
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -348,7 +390,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN typing_complete_ms INTEGER NOT NULL DEFAULT 500
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -357,7 +399,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN character_interval_ms INTEGER NOT NULL DEFAULT 100
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -366,7 +408,7 @@ impl Database {
             ALTER TABLE hotkey_configs ADD COLUMN short_operation_ms INTEGER NOT NULL DEFAULT 100
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
 
@@ -388,7 +430,7 @@ impl Database {
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Create latency records table
@@ -403,7 +445,7 @@ impl Database {
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Create usage logs table
@@ -421,20 +463,20 @@ impl Database {
             )
             "#
         )
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // Create indexes for statistics tables
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_latency_service ON latency_records(service_name)")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_latency_recorded ON latency_records(recorded_at)")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_usage_date ON usage_logs(date)")
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
 
         info!("Database migrations completed successfully");
@@ -446,7 +488,7 @@ impl Database {
         let config = sqlx::query_as::<_, HotkeyConfig>(
             "SELECT * FROM hotkey_configs ORDER BY updated_at DESC LIMIT 1"
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         Ok(config)
@@ -504,7 +546,7 @@ impl Database {
         .bind(delays.character_interval_ms)
         .bind(delays.short_operation_ms)
         .bind(now)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         if let Some(config) = update_result {
@@ -543,7 +585,7 @@ impl Database {
             .bind(delays.short_operation_ms)
             .bind(now)
             .bind(now)
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
             info!("Created new hotkey config");
@@ -560,7 +602,7 @@ impl Database {
         let config = sqlx::query_as::<_, AsrConfig>(
             "SELECT * FROM asr_configs ORDER BY updated_at DESC LIMIT 1"
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         if let Some(ref cfg) = config {
@@ -571,6 +613,7 @@ impl Database {
             println!("  - Local API Key: {}", cfg.local_api_key.is_some());
             println!("  - Cloud Endpoint: {:?}", cfg.cloud_endpoint);
             println!("  - Cloud API Key: {}", cfg.cloud_api_key.is_some());
+            println!("  - Whisper Model: {:?}", cfg.whisper_model);
             println!("  - Created At: {}", cfg.created_at);
             println!("  - Updated At: {}", cfg.updated_at);
         } else {
@@ -587,19 +630,21 @@ impl Database {
         local_api_key: Option<&str>,
         cloud_endpoint: Option<&str>,
         cloud_api_key: Option<&str>,
+        whisper_model: Option<&str>,
     ) -> Result<AsrConfig, sqlx::Error> {
         let now = Utc::now();
 
         // First, try to update existing record
         let update_result = sqlx::query_as::<_, AsrConfig>(
             r#"
-            UPDATE asr_configs 
-            SET service_provider = $1, 
-                local_endpoint = $2, 
-                local_api_key = $3, 
-                cloud_endpoint = $4, 
+            UPDATE asr_configs
+            SET service_provider = $1,
+                local_endpoint = $2,
+                local_api_key = $3,
+                cloud_endpoint = $4,
                 cloud_api_key = $5,
-                updated_at = $6
+                whisper_model = $6,
+                updated_at = $7
             WHERE id = (SELECT id FROM asr_configs ORDER BY updated_at DESC LIMIT 1)
             RETURNING *
             "#
@@ -609,13 +654,14 @@ impl Database {
         .bind(local_api_key)
         .bind(cloud_endpoint)
         .bind(cloud_api_key)
+        .bind(whisper_model)
         .bind(now)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         if let Some(config) = update_result {
             info!("Updated ASR config for provider: {}", service_provider);
-            println!("✅ Database: Updated existing ASR config with new API key");
+            println!("✅ Database: Updated existing ASR config with whisper model: {:?}", whisper_model);
             Ok(config)
         } else {
             // If no existing record, insert new one
@@ -626,8 +672,8 @@ impl Database {
 
             let config = sqlx::query_as::<_, AsrConfig>(
                 r#"
-                INSERT INTO asr_configs (id, service_provider, local_endpoint, local_api_key, cloud_endpoint, cloud_api_key, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                INSERT INTO asr_configs (id, service_provider, local_endpoint, local_api_key, cloud_endpoint, cloud_api_key, whisper_model, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING *
                 "#
             )
@@ -637,9 +683,10 @@ impl Database {
             .bind(local_api_key)
             .bind(cloud_endpoint)
             .bind(cloud_api_key)
+            .bind(whisper_model)
             .bind(now)
             .bind(now)
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
             info!("Created new ASR config for provider: {}", service_provider);
@@ -653,7 +700,7 @@ impl Database {
             "SELECT * FROM translation_configs WHERE provider = $1 ORDER BY updated_at DESC LIMIT 1"
         )
         .bind(provider)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         Ok(config)
@@ -681,7 +728,7 @@ impl Database {
         .bind(endpoint)
         .bind(now)
         .bind(now)
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
         .await?;
 
         info!("Saved translation config for provider: {}", provider);
@@ -710,7 +757,7 @@ impl Database {
         .bind(record.success)
         .bind(&record.error_message)
         .bind(now)
-        .fetch_one(&self.pool)
+        .fetch_one(&*self.pool)
         .await?;
 
         // Update service statistics after successful history record addition
@@ -743,10 +790,11 @@ impl Database {
     // Helper function to update latency from a new history record
     async fn update_latency_from_record(&self, record: &NewHistoryRecord, timestamp: chrono::DateTime<chrono::Utc>) -> Result<(), sqlx::Error> {
         let service_name = match record.processor_type.as_deref() {
-            Some("whisper") => "whisper_asr",
+            Some("whisper") | Some("whisper-rs") => "local_asr",  // whisper-rs maps to local_asr
             Some("sensevoice") => "sensevoice_asr",
             Some("local") => "local_asr",
-            _ => "unknown_service",
+            Some("cloud") => "cloud_asr",
+            _ => "local_asr",  // Default to local_asr for unknown types
         };
 
         // Insert latency record
@@ -762,7 +810,7 @@ impl Database {
         .bind(record.processing_time_ms.unwrap_or(0))
         .bind(&record.record_type)
         .bind(timestamp)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -793,7 +841,7 @@ impl Database {
         .bind(&today)
         .bind(seconds_today)
         .bind(if record.success { 1 } else { 0 })
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         Ok(())
@@ -823,7 +871,7 @@ impl Database {
         }
 
         let records = sqlx::query_as::<_, HistoryRecord>(&query)
-            .fetch_all(&self.pool)
+            .fetch_all(&*self.pool)
             .await?;
 
         Ok(records)
@@ -831,15 +879,15 @@ impl Database {
 
     pub async fn get_history_stats(&self) -> Result<(i64, i64, i64), sqlx::Error> {
         let total_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_records")
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         let success_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_records WHERE success = true")
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         let transcribe_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM history_records WHERE record_type = 'transcribe'")
-            .fetch_one(&self.pool)
+            .fetch_one(&*self.pool)
             .await?;
 
         Ok((total_count, success_count, transcribe_count))
@@ -853,7 +901,7 @@ impl Database {
             "DELETE FROM history_records WHERE created_at < $1"
         )
         .bind(cutoff_date)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         let deleted_count = result.rows_affected();
@@ -864,46 +912,8 @@ impl Database {
 
     /// Create or get a global database pool instance
     pub async fn from_global_pool() -> Result<Self, sqlx::Error> {
-        static GLOBAL_POOL: std::sync::LazyLock<Arc<Mutex<Option<SqlitePool>>>> =
-            std::sync::LazyLock::new(|| Arc::new(Mutex::new(None)));
-
-        // Try to get existing pool
-        {
-            let pool_guard = GLOBAL_POOL.lock().unwrap();
-            if let Some(ref pool) = *pool_guard {
-                let db = Self { pool: pool.clone() };
-                return Ok(db);
-            }
-        }
-
-        // Create new pool if none exists
-        let app_dir = std::env::current_dir().unwrap().join(".tauri-data");
-        std::fs::create_dir_all(&app_dir).ok();
-
-        let db_dir = app_dir.join("databases");
-        std::fs::create_dir_all(&db_dir).ok();
-
-        let db_path = db_dir.join("voice_assistant.db");
-        let connection_string = format!("sqlite:{}", db_path.display());
-
-        info!("Initializing global database pool at: {}", connection_string);
-
-        let connect_options = SqliteConnectOptions::from_str(&connection_string)
-            .unwrap_or_else(|_| SqliteConnectOptions::new().filename(&db_path))
-            .create_if_missing(true);
-
-        let pool = SqlitePool::connect_with(connect_options).await?;
-
-        // Store the pool globally
-        {
-            let mut pool_guard = GLOBAL_POOL.lock().unwrap();
-            *pool_guard = Some(pool.clone());
-        }
-
-        let db = Self { pool };
-        // Run migrations
-        db.migrate().await?;
-        Ok(db)
+        // 使用同一个全局连接池
+        Self::new().await
     }
 
     // Statistics methods for frontend
@@ -912,7 +922,7 @@ impl Database {
             "SELECT * FROM service_stats WHERE service_name = ?"
         )
         .bind(service_name)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         Ok(stats)
@@ -922,7 +932,7 @@ impl Database {
         let stats = sqlx::query_as::<_, ServiceStats>(
             "SELECT * FROM service_stats ORDER BY updated_at DESC"
         )
-        .fetch_all(&self.pool)
+        .fetch_all(&*self.pool)
         .await?;
 
         Ok(stats)
@@ -945,7 +955,7 @@ impl Database {
         .bind(&endpoint)
         .bind(now)
         .bind(service_name)
-        .execute(&self.pool)
+        .execute(&*self.pool)
         .await?;
 
         // If no rows were affected, create a new service stats record
@@ -971,7 +981,7 @@ impl Database {
             .bind(0i64)
             .bind(now)
             .bind(now)
-            .execute(&self.pool)
+            .execute(&*self.pool)
             .await?;
         }
 
@@ -990,7 +1000,7 @@ impl Database {
         )
         .bind(service_name)
         .bind(cutoff)
-        .fetch_all(&self.pool)
+        .fetch_all(&*self.pool)
         .await?;
 
         Ok(records)
@@ -1001,7 +1011,7 @@ impl Database {
             "SELECT * FROM usage_logs WHERE date = ?"
         )
         .bind(date)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&*self.pool)
         .await?;
 
         Ok(usage)
@@ -1013,9 +1023,10 @@ impl Database {
     }
 }
 
-impl Drop for Database {
-    fn drop(&mut self) {
-        // Note: In a real application, you might want to close the pool gracefully
-        info!("Database connection dropped");
-    }
-}
+// 移除 Drop trait，因为使用全局连接池，不需要在 drop 时关闭连接
+// impl Drop for Database {
+//     fn drop(&mut self) {
+//         // 不再输出 "Database connection dropped" 消息
+//         // 因为使用全局连接池，连接会一直保持
+//     }
+// }

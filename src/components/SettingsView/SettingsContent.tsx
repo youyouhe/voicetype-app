@@ -8,6 +8,7 @@ import { DatabaseService, AsrConfigRequest, StorageMigration } from '../../servi
 import { configManager } from '../../services/configManager';
 import { invoke } from '@tauri-apps/api/core';
 import { HotkeyConfig, HotkeyConfigRequest, TypingDelays } from '../../types';
+import { useLanguage } from '../../contexts/LanguageContext';
 
 // Service Option Component
 const ServiceOption: React.FC<ServiceOptionProps> = ({ id, title, description, icon, selected, onSelect, disabled = false }) => (
@@ -16,27 +17,29 @@ const ServiceOption: React.FC<ServiceOptionProps> = ({ id, title, description, i
     className={`
       relative flex items-start p-4 rounded-xl border-2 transition-all duration-200
       ${selected
-        ? 'border-primary-500 bg-primary-50'
+        ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30'
         : disabled
-          ? 'border-gray-200 bg-gray-100 cursor-not-allowed opacity-60'
-          : 'border-gray-200 bg-white hover:border-gray-300 hover:bg-gray-50 cursor-pointer'}
+          ? 'border-gray-200 dark:border-slate-700 bg-gray-100 dark:bg-slate-800 cursor-not-allowed opacity-60'
+          : 'border-gray-200 dark:border-slate-700 bg-white dark:bg-dark-surface hover:border-gray-300 dark:hover:border-slate-600 hover:bg-gray-50 dark:hover:bg-slate-800 cursor-pointer'}
     `}
   >
-    <div className={`p-2 rounded-lg mr-4 ${selected ? 'bg-primary-100 text-primary-600' : disabled ? 'bg-gray-100 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
+    <div className={`p-2 rounded-lg mr-4 ${selected ? 'bg-primary-100 dark:bg-primary-900/50 text-primary-600 dark:text-primary-400' : disabled ? 'bg-gray-100 dark:bg-slate-800 text-gray-400 dark:text-gray-500' : 'bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-gray-400'}`}>
       {icon}
     </div>
     <div className="flex-1">
       <div className="flex justify-between">
-        <h3 className={`font-semibold ${selected ? 'text-primary-900' : disabled ? 'text-gray-500' : 'text-gray-900'}`}>{title}</h3>
-        {selected && <Check className="w-5 h-5 text-primary-500" />}
+        <h3 className={`font-semibold ${selected ? 'text-primary-900 dark:text-primary-100' : disabled ? 'text-gray-500 dark:text-gray-400' : 'text-gray-900 dark:text-gray-100'}`}>{title}</h3>
+        {selected && <Check className="w-5 h-5 text-primary-500 dark:text-primary-400" />}
       </div>
-      <p className={`text-sm mt-1 ${selected ? 'text-primary-700' : disabled ? 'text-gray-400' : 'text-gray-500'}`}>{description}</p>
+      <p className={`text-sm mt-1 ${selected ? 'text-primary-700 dark:text-primary-300' : disabled ? 'text-gray-400 dark:text-gray-500' : 'text-gray-500 dark:text-gray-400'}`}>{description}</p>
     </div>
   </div>
 );
 
 // ASR Settings Form
 export const ASRSettings: React.FC = () => {
+  const { t } = useLanguage();
+
   // Track component mount/remount
   const mountId = useRef(`mount-${Date.now()}-${Math.random()}`);
   
@@ -569,8 +572,8 @@ export const ASRSettings: React.FC = () => {
     <div className="max-w-3xl animate-in fade-in duration-500">
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center space-x-3">
-          <h2 className="text-2xl font-bold text-gray-900">ASR Service Settings</h2>
-          
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t.asrServiceSettings}</h2>
+
           {/* Debug refresh button */}
           <Button
             onClick={manualRefreshConfig}
@@ -579,7 +582,7 @@ export const ASRSettings: React.FC = () => {
             size="sm"
             className="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200"
           >
-            🔄 Debug Refresh
+            {t.debugRefresh}
           </Button>
 
           {/* Health Status Indicator */}
@@ -628,8 +631,8 @@ export const ASRSettings: React.FC = () => {
       </div>
 
       {/* Service Selection */}
-      <section className="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Voice Recognition Provider</h3>
+      <section className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-6 mb-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t.voiceRecognitionProvider}</h3>
         <div className="grid gap-4">
           <ServiceOption
             id={ServiceProvider.Local}
@@ -653,24 +656,24 @@ export const ASRSettings: React.FC = () => {
       </section>
 
       {/* Configuration */}
-      <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">Connection Config</h3>
+      <section className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-6 shadow-sm">
+        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t.connectionConfig}</h3>
         <div className="space-y-4">
           {hasLoadedFromDatabase && selectedService === ServiceProvider.Local ? (
             <>
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                 <div className="flex items-start space-x-3">
-                  <Server className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <Server className="w-5 h-5 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
                   <div>
-                    <h4 className="text-sm font-semibold text-blue-900">Local Whisper Configuration</h4>
-                    <p className="text-sm text-blue-700 mt-1">
-                      Local Whisper uses whisper-rs for on-device inference. The system automatically detects and uses your downloaded model at:
+                    <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100">{t.localWhisperConfiguration}</h4>
+                    <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                      {t.localWhisperDescription}
                     </p>
-                    <code className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded mt-2 block font-mono">
+                    <code className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 px-2 py-1 rounded mt-2 block font-mono">
                       ~/.local/share/com.martin.flash-input/models/ggml-{currentWhisperModel}.bin
                     </code>
-                    <p className="text-sm text-blue-700 mt-2">
-                      No configuration required - just ensure the model file is present.
+                    <p className="text-sm text-blue-700 dark:text-blue-300 mt-2">
+                      {t.localWhisperNoConfig}
                     </p>
                   </div>
                 </div>
@@ -679,35 +682,35 @@ export const ASRSettings: React.FC = () => {
           ) : hasLoadedFromDatabase && selectedService === ServiceProvider.Cloud ? (
             <>
               <Input
-                label="Cloud ASR API Endpoint"
+                label={t.cloudAsrEndpoint}
                 value={cloudEndpoint}
                 onChange={handleCloudEndpointChange}
-                placeholder="https://api.example.com/v1/audio/transcriptions"
+                placeholder={t.cloudAsrEndpointPlaceholder}
                 disabled={isLoading}
                 autoFocus={false}
                 error={isEndpointInsecure(cloudEndpoint) ? 'Warning: Using HTTP is insecure. Credentials may be transmitted unencrypted.' : undefined}
               />
               <Input
-                label="Cloud ASR API Key"
+                label={t.cloudAsrApiKey}
                 type="password"
                 value={apiKey}
                 onChange={handleApiKeyChange}
-                placeholder="sk-..."
+                placeholder={t.cloudAsrApiKeyPlaceholder}
                 required
                 disabled={isLoading}
                 autoFocus={false}
               />
-              <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg p-3">
-                ⚠️ <strong>Security Notice:</strong> API keys are sensitive credentials. Never share them publicly or commit to version control. Use HTTPS endpoints when possible.
+              <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
+                ⚠️ <strong>{t.securityNotice}</strong> {t.securityNoticeDesc}
               </p>
-              <p className="text-sm text-gray-500">
-                Cloud ASR supports multiple providers (SiliconFlow, Groq). The endpoint determines which provider to use.
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                {t.cloudAsrMultipleProviders}
               </p>
             </>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-500 dark:text-gray-400">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary-500 mx-auto mb-3"></div>
-              <p>Loading configuration...</p>
+              <p>{t.loadingConfiguration}</p>
             </div>
           )}
 
@@ -721,7 +724,7 @@ export const ASRSettings: React.FC = () => {
                 variant="primary"
                 icon={<Save className="w-4 h-4"/>}
               >
-                Save Configuration
+                {t.saveConfiguration}
               </Button>
             )}
             <Button
@@ -730,7 +733,7 @@ export const ASRSettings: React.FC = () => {
               disabled={isLoading || isSaving || !hasLoadedFromDatabase || !selectedFile}
               icon={<Globe className="w-4 h-4"/>}
             >
-              Test ASR with WAV File
+              {t.testAsrWithWavFile}
             </Button>
 
             {/* File Input */}
@@ -745,12 +748,12 @@ export const ASRSettings: React.FC = () => {
                 />
                 <div className={`flex items-center px-4 py-2 border-2 border-dashed rounded-lg ${
                   selectedFile
-                    ? 'border-green-300 bg-green-50 text-green-800'
-                    : 'border-gray-300 bg-gray-50 text-gray-700 hover:border-gray-400'
+                    ? 'border-green-300 dark:border-green-600 bg-green-50 dark:bg-green-900/20 text-green-800 dark:text-green-300'
+                    : 'border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-gray-300 hover:border-gray-400 dark:hover:border-gray-500'
                 } transition-colors`}>
                   <Globe className="w-4 h-4 mr-2" />
                   <span className="text-sm font-medium">
-                    {selectedFile ? selectedFile.name : 'Choose WAV File'}
+                    {selectedFile ? selectedFile.name : t.chooseWavFile}
                   </span>
                 </div>
               </label>
@@ -760,25 +763,25 @@ export const ASRSettings: React.FC = () => {
             {asrTestMessage && (
               <div className={`mt-4 p-4 rounded-lg border ${
                 asrResult
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'
+                  ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
               }`}>
                 <div className="flex items-start space-x-2">
                   {asrResult ? (
-                    <Check className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
+                    <Check className="w-5 h-5 text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
                   ) : (
-                    <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
                   )}
                   <div className="flex-1">
                     <p className={`text-sm font-medium ${
-                      asrResult ? 'text-green-800' : 'text-red-800'
+                      asrResult ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'
                     }`}>
                       {asrTestMessage}
                     </p>
                     {asrResult && (
-                      <div className="mt-3 p-3 bg-white rounded border border-green-200">
-                        <p className="text-xs text-gray-500 mb-2 font-medium">Transcription Result:</p>
-                        <p className="text-sm text-gray-900 leading-relaxed whitespace-pre-wrap">
+                      <div className="mt-3 p-3 bg-white dark:bg-slate-900 rounded border border-green-200 dark:border-green-800">
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 font-medium">{t.transcriptionResult}</p>
+                        <p className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed whitespace-pre-wrap">
                           {asrResult}
                         </p>
                       </div>
@@ -797,17 +800,17 @@ export const ASRSettings: React.FC = () => {
           onClick={() => setShowDebugPanel(!showDebugPanel)}
           variant="secondary"
           size="sm"
-          className="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 border-gray-300"
+          className="text-xs bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 text-gray-600 dark:text-gray-300 border-gray-300 dark:border-slate-600"
         >
-          {showDebugPanel ? 'Hide' : 'Show'} Debug Panel ({debugLogs.length} logs)
+          {showDebugPanel ? t.hideDebugPanel : t.showDebugPanel} {t.debugPanelLogs} ({debugLogs.length} logs)
         </Button>
       </div>
 
       {/* Debug Panel */}
       {showDebugPanel && (
-        <section className="mt-4 bg-gray-900 text-green-400 rounded-xl border border-gray-700 p-4 shadow-sm font-mono text-xs">
+        <section className="mt-4 bg-gray-900 dark:bg-slate-950 text-green-400 dark:text-green-300 rounded-xl border border-gray-700 dark:border-slate-800 p-4 shadow-sm font-mono text-xs">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="text-sm font-bold text-green-300">🔍 ASR Debug Console</h3>
+            <h3 className="text-sm font-bold text-green-300 dark:text-green-200">{t.debugPanelTitle}</h3>
             <div className="flex space-x-2">
               <Button
                 onClick={() => {
@@ -816,34 +819,34 @@ export const ASRSettings: React.FC = () => {
                 }}
                 variant="secondary"
                 size="sm"
-                className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600"
+                className="text-xs bg-gray-800 dark:bg-slate-900 hover:bg-gray-700 dark:hover:bg-slate-800 text-gray-300 dark:text-gray-200 border-gray-600 dark:border-slate-700"
               >
-                Copy
+                {t.copy}
               </Button>
               <Button
                 onClick={() => setDebugLogs([])}
                 variant="secondary"
                 size="sm"
-                className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600"
+                className="text-xs bg-gray-800 dark:bg-slate-900 hover:bg-gray-700 dark:hover:bg-slate-800 text-gray-300 dark:text-gray-200 border-gray-600 dark:border-slate-700"
               >
-                Clear
+                {t.clearLogs}
               </Button>
             </div>
           </div>
           <div className="max-h-80 overflow-y-auto space-y-1">
             {debugLogs.length === 0 ? (
-              <div className="text-gray-500 text-center py-4">No debug logs yet. Try performing an action...</div>
+              <div className="text-gray-500 dark:text-gray-400 text-center py-4">{t.noDebugLogsYet}</div>
             ) : (
               debugLogs.map((log, index) => (
-                <div key={index} className="border-b border-gray-800 pb-1 last:border-b-0">
+                <div key={index} className="border-b border-gray-800 dark:border-slate-800 pb-1 last:border-b-0">
                   {log}
                 </div>
               ))
             )}
           </div>
-          <div className="mt-3 pt-3 border-t border-gray-700">
-            <div className="flex justify-between items-center text-xs text-gray-400">
-              <span>Environment: {typeof window !== 'undefined' && window.__TAURI__ ? 'Tauri Desktop' : 'Browser'}</span>
+          <div className="mt-3 pt-3 border-t border-gray-700 dark:border-slate-800">
+            <div className="flex justify-between items-center text-xs text-gray-400 dark:text-gray-500">
+              <span>{t.environment} {typeof window !== 'undefined' && window.__TAURI__ ? t.tauriDesktop : t.browser}</span>
               <span>Logs: {debugLogs.length}/50</span>
             </div>
           </div>
@@ -855,6 +858,8 @@ export const ASRSettings: React.FC = () => {
 
 // Shortcuts Settings
 export const ShortcutSettings: React.FC = () => {
+    const { t } = useLanguage();
+
     const [transcribeKey, setTranscribeKey] = useState('F4');
     const [translateKey, setTranslateKey] = useState('Shift + F4');
     const [delay, setDelay] = useState(0.3);
@@ -949,21 +954,21 @@ export const ShortcutSettings: React.FC = () => {
 
     return (
         <div className="max-w-3xl animate-in fade-in duration-500">
-             <h2 className="text-2xl font-bold text-gray-900 mb-6">Shortcuts & Behaviors</h2>
-             
-             <section className="bg-white rounded-xl border border-gray-200 p-6 mb-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Global Hotkeys</h3>
+             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">{t.shortcutsTitle}</h2>
+
+             <section className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-6 mb-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t.globalHotkeys}</h3>
                 <div className="space-y-6">
-                    <HotkeyInput label="Start Transcription" value={transcribeKey} onChange={setTranscribeKey} placeholder="Press keys..." autoFocus={false} />
-                    <HotkeyInput label="Start Translation" value={translateKey} onChange={setTranslateKey} placeholder="Press keys..." autoFocus={false} />
+                    <HotkeyInput label={t.startTranscription} value={transcribeKey} onChange={setTranscribeKey} placeholder={t.pressKeys} autoFocus={false} />
+                    <HotkeyInput label={t.startTranslation} value={translateKey} onChange={setTranslateKey} placeholder={t.pressKeys} autoFocus={false} />
                 </div>
              </section>
 
-             <section className="bg-white rounded-xl border border-gray-200 p-6 shadow-sm">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">Prevention</h3>
+             <section className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">{t.prevention}</h3>
                 <div className="space-y-4">
-                    <Input label="Trigger Delay (seconds)" type="number" step={0.1} value={delay} onChange={setDelay} unit="s" autoFocus={false} />
-                    <ToggleInput label="Enable Anti-Mistouch" checked={antiTouch} onChange={setAntiTouch} description="Prevents accidental recording when holding keys briefly." />
+                    <Input label={t.triggerDelaySeconds} type="number" step={0.1} value={delay} onChange={setDelay} unit={t.seconds} autoFocus={false} />
+                    <ToggleInput label={t.enableAntiMistouch} checked={antiTouch} onChange={setAntiTouch} description={t.antiMistouchFullDesc} />
                 </div>
              </section>
 
@@ -979,12 +984,12 @@ export const ShortcutSettings: React.FC = () => {
                      {isSaving ? (
                          <div className="flex items-center">
                              <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2" />
-                             Saving...
+                             {t.saving}
                          </div>
                      ) : (
                          <div className="flex items-center">
                              <Save className="w-4 h-4 mr-2" />
-                             Save Shortcuts
+                             {t.saveShortcuts}
                          </div>
                      )}
                  </Button>
@@ -995,13 +1000,13 @@ export const ShortcutSettings: React.FC = () => {
 
 export const PlaceholderSettings: React.FC<{title: string}> = ({title}) => (
     <div className="max-w-3xl animate-in fade-in duration-500">
-        <h2 className="text-2xl font-bold text-gray-900 mb-6">{title}</h2>
-        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center shadow-sm">
-            <div className="inline-block p-4 rounded-full bg-gray-50 mb-4">
-                <Sliders className="w-8 h-8 text-gray-400" />
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6">{title}</h2>
+        <div className="bg-white dark:bg-dark-surface rounded-xl border border-gray-200 dark:border-dark-border p-12 text-center shadow-sm">
+            <div className="inline-block p-4 rounded-full bg-gray-50 dark:bg-slate-800 mb-4">
+                <Sliders className="w-8 h-8 text-gray-400 dark:text-gray-500" />
             </div>
-            <h3 className="text-gray-900 font-medium text-lg">Coming Soon</h3>
-            <p className="text-gray-500 mt-2">This settings module is currently under development.</p>
+            <h3 className="text-gray-900 dark:text-gray-100 font-medium text-lg">Coming Soon</h3>
+            <p className="text-gray-500 dark:text-gray-400 mt-2">This settings module is currently under development.</p>
         </div>
     </div>
 );
