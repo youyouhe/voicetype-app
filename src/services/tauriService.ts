@@ -119,6 +119,15 @@ export class TauriService {
     return await invoke<any>('get_model_stats');
   }
 
+  // Download Site Methods
+  static async getDownloadSites(): Promise<any[]> {
+    return await invoke<any[]>('get_download_sites');
+  }
+
+  static async testDownloadSites(): Promise<any[]> {
+    return await invoke<any[]>('test_download_sites');
+  }
+
   // History functions
   static async getHistoryRecords(limit?: number): Promise<any[]> {
     return await invoke<any[]>('get_history_records', { limit });
