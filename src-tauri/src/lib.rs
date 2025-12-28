@@ -98,7 +98,9 @@ use voice_assistant::{
     GlobalHotkeyManager, ensure_dependencies,
     // Model management commands
     get_available_models, download_model, delete_model, set_active_model,
-    get_active_model_info, get_model_stats, check_model_loaded
+    get_active_model_info, get_model_stats, check_model_loaded,
+    // Download site commands
+    get_download_sites, test_download_sites
 };
 
 // Import commands module
@@ -165,6 +167,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_single_instance::init(
+            |app, _args, _cwd| {
+                // This callback is invoked when another instance is launched
+                println!("🔄 Another instance attempted to launch");
+
+                // Focus the existing window using Manager trait
+                use tauri::Manager;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_focus();
+                    let _ = window.unminimize();
+                }
+            }
+        ))
         .setup(|app| {
             // Set the global app handle for event emission
             crate::voice_assistant::coordinator::set_app_handle(app.handle().clone());
@@ -269,6 +284,9 @@ pub fn run() {
             get_active_model_info,
             get_model_stats,
             check_model_loaded,
+            // Download site commands
+            get_download_sites,
+            test_download_sites,
             // Global WhisperRS manager commands
             get_whisper_manager_status,
             reload_whisper_processor,

@@ -5,6 +5,75 @@ use serde::{Serialize, Deserialize};
 use tauri::{AppHandle, Emitter, Manager};
 use crate::voice_assistant::VoiceError;
 
+/// Download site configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DownloadSite {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+}
+
+impl DownloadSite {
+    pub fn new(id: &str, name: &str, base_url: &str) -> Self {
+        Self {
+            id: id.to_string(),
+            name: name.to_string(),
+            base_url: base_url.to_string(),
+        }
+    }
+
+    /// Get all available download sites
+    pub fn get_all_sites() -> Vec<Self> {
+        vec![
+            Self::new(
+                "huggingface",
+                "Hugging Face (Official)",
+                "https://huggingface.co/ggerganov/whisper.cpp/resolve/main"
+            ),
+            Self::new(
+                "hf-mirror",
+                "HF-Mirror (China)",
+                "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main"
+            ),
+        ]
+    }
+
+    /// Test if this site is accessible by making a HEAD request
+    pub fn test_connectivity(&self) -> bool {
+        println!("🔍 Testing connectivity to: {} ({})", self.name, self.base_url);
+
+        // Use curl to test connectivity with a timeout
+        let test_url = format!("{}/ggml-tiny.bin", self.base_url); // Test with smallest file
+
+        let result = Command::new("curl")
+            .args([
+                "-I",              // HEAD request only
+                "-s",              // Silent mode
+                "--connect-timeout", "5", // 5 second timeout
+                "--max-time", "10",       // 10 second max time
+                &test_url,
+            ])
+            .output();
+
+        match result {
+            Ok(output) => {
+                let is_accessible = output.status.success() &&
+                    String::from_utf8_lossy(&output.stdout).contains("HTTP");
+                println!("{} Connectivity test for {}: {}",
+                    if is_accessible { "✅" } else { "❌" },
+                    self.name,
+                    if is_accessible { "SUCCESS" } else { "FAILED" }
+                );
+                is_accessible
+            }
+            Err(e) => {
+                println!("❌ Connectivity test for {} failed: {}", self.name, e);
+                false
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WhisperModel {
     pub name: String,
@@ -27,12 +96,17 @@ impl WhisperModel {
             file_name: file_name.to_string(),
             size_mb,
             description: description.to_string(),
-            download_url: format!("https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{}", file_name),
+            download_url: String::new(), // Will be set later based on available site
             is_downloaded: false,
             file_path: None,
             download_progress: 0.0,
             is_downloading: false,
         }
+    }
+
+    /// Set download URL based on base site
+    pub fn set_download_url(&mut self, base_url: &str) {
+        self.download_url = format!("{}/{}", base_url.trim_end_matches('/'), self.file_name);
     }
 }
 
@@ -40,6 +114,7 @@ pub struct ModelManager {
     models_dir: PathBuf,
     models: Vec<WhisperModel>,
     app_handle: AppHandle,
+    preferred_site: Option<String>, // Store last successful site ID
 }
 
 impl ModelManager {
@@ -58,6 +133,7 @@ impl ModelManager {
             models_dir,
             models: Vec::new(),
             app_handle,
+            preferred_site: None,
         };
 
         manager.initialize_models();
@@ -65,7 +141,7 @@ impl ModelManager {
     }
 
     fn initialize_models(&mut self) {
-        // Define available models - only turbo and v2
+        // Define available models - turbo, v2, and quantized versions
         // size_mb will be updated to actual file size if downloaded, otherwise use estimate
         self.models = vec![
             WhisperModel::new(
@@ -74,6 +150,13 @@ impl ModelManager {
                 "ggml-large-v3-turbo.bin",
                 0.0, // Will be updated from actual file or estimate
                 "最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用"
+            ),
+            WhisperModel::new(
+                "large-v3-turbo-q5_0",
+                "Turbo Q5_0",
+                "ggml-large-v3-turbo-q5_0.bin",
+                0.0, // Will be updated from actual file or estimate
+                "Turbo模型的Q5_0量化版本，体积更小但保持高准确性，推荐用于存储空间有限的设备"
             ),
             WhisperModel::new(
                 "large-v2",
@@ -106,12 +189,50 @@ impl ModelManager {
                 // Use estimated size for non-downloaded models
                 model.size_mb = match model.name.as_str() {
                     "large-v3-turbo" => 1570.0,
+                    "large-v3-turbo-q5_0" => 990.0, // Q5_0 quantized version is ~1GB
                     "large-v2" => 1550.0,
                     _ => 0.0,
                 };
                 println!("ℹ️ Using estimated size for {}: {:.2} MB", model.name, model.size_mb);
             }
         }
+    }
+
+    /// Automatically select the best available download site
+    fn select_best_site(&mut self) -> Result<DownloadSite, VoiceError> {
+        let sites = DownloadSite::get_all_sites();
+
+        println!("🔍 Starting automatic site detection...");
+
+        // If we have a preferred site, try it first
+        if let Some(ref preferred_id) = self.preferred_site {
+            if let Some(preferred_site) = sites.iter().find(|s| &s.id == preferred_id) {
+                println!("🔄 Testing preferred site: {}", preferred_site.name);
+                if preferred_site.test_connectivity() {
+                    println!("✅ Preferred site is accessible: {}", preferred_site.name);
+                    return Ok(preferred_site.clone());
+                } else {
+                    println!("⚠️ Preferred site is not accessible, trying others...");
+                    self.preferred_site = None; // Reset if not accessible
+                }
+            }
+        }
+
+        // Try all sites in order
+        for site in &sites {
+            if site.test_connectivity() {
+                println!("✅ Found accessible site: {}", site.name);
+                self.preferred_site = Some(site.id.clone());
+                return Ok(site.clone());
+            }
+        }
+
+        Err(VoiceError::Other("No accessible download site found. Please check your internet connection.".to_string()))
+    }
+
+    /// Get current preferred site (for UI display)
+    pub fn get_preferred_site(&self) -> Option<String> {
+        self.preferred_site.clone()
     }
 
     pub fn get_models(&self) -> Vec<WhisperModel> {
@@ -137,10 +258,13 @@ impl ModelManager {
         let model_name_owned = model_name.to_string(); // Create owned String
         let model_name_str = model_name; // Use the original &str
 
-        // Mark as downloading before spawning task
+        // Auto-select best available download site
+        println!("🌐 Detecting best download site...");
+        let download_site = self.select_best_site()?;
+
+        // Mark as downloading and set download URL
         {
             let model = &mut self.models[model_index];
-            println!("📋 Model info: {} ({} MB), URL: {}", model.display_name, model.size_mb, model.download_url);
 
             if model.is_downloaded {
                 println!("⚠️ Model '{}' already downloaded", model_name);
@@ -151,6 +275,13 @@ impl ModelManager {
                 println!("⚠️ Model '{}' already downloading", model_name);
                 return Err(VoiceError::Other("Model already downloading".to_string()));
             }
+
+            // Set download URL based on selected site
+            model.set_download_url(&download_site.base_url);
+
+            println!("📋 Model info: {} ({} MB)", model.display_name, model.size_mb);
+            println!("🌐 Download site: {}", download_site.name);
+            println!("🔗 Download URL: {}", model.download_url);
 
             model.is_downloading = true;
             model.download_progress = 0.0;
@@ -531,4 +662,32 @@ pub async fn check_model_loaded(model_name: String) -> Result<bool, String> {
     }
 
     Ok(false)
+}
+
+/// Get all available download sites
+#[tauri::command]
+pub async fn get_download_sites() -> Result<Vec<DownloadSite>, String> {
+    Ok(DownloadSite::get_all_sites())
+}
+
+/// Test connectivity to all download sites
+#[tauri::command]
+pub async fn test_download_sites() -> Result<Vec<DownloadSite>, String> {
+    let sites = DownloadSite::get_all_sites();
+
+    // Test all sites in parallel using tokio
+    let test_results = tokio::task::spawn_blocking(move || {
+        sites.iter().map(|site| {
+            let is_accessible = site.test_connectivity();
+            (site.clone(), is_accessible)
+        }).collect::<Vec<_>>()
+    }).await.map_err(|e| e.to_string())?;
+
+    // Return all sites with their accessibility status
+    let sites_with_status: Vec<DownloadSite> = test_results.iter()
+        .filter(|(_, accessible)| *accessible)
+        .map(|(site, _)| site.clone())
+        .collect();
+
+    Ok(sites_with_status)
 }

@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use crate::voice_assistant::{
     AsrProcessor, TranslateProcessor,
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
@@ -219,6 +219,7 @@ impl Default for VoiceAssistantConfig {
 
 pub struct VoiceAssistant {
     config: VoiceAssistantConfig,
+    app_handle: Option<AppHandle>,
     asr_processor: Option<Arc<dyn AsrProcessor + Send + Sync>>,
     translate_processor: Option<Arc<dyn TranslateProcessor + Send + Sync>>,
     keyboard_manager: Arc<Mutex<KeyboardManager>>,
@@ -229,6 +230,10 @@ pub struct VoiceAssistant {
 
 impl VoiceAssistant {
     pub async fn new() -> Result<Self, VoiceError> {
+        Self::new_with_handle(None).await
+    }
+
+    pub async fn new_with_handle(app_handle: Option<AppHandle>) -> Result<Self, VoiceError> {
         // Initialize logger first
         if let Err(e) = crate::voice_assistant::init_logger() {
             eprintln!("Failed to initialize logger: {}", e);
@@ -268,6 +273,17 @@ impl VoiceAssistant {
             },
             ProcessorType::WhisperRS => {
                 info!("Creating WhisperRS processor (Local whisper.cpp)");
+
+                // Get the correct models directory using Tauri API if available
+                let models_dir = if let Some(ref handle) = app_handle {
+                    handle.path()
+                        .app_data_dir()
+                        .unwrap_or_else(|_| std::env::current_dir().unwrap().join("data"))
+                        .join("models")
+                } else {
+                    crate::utils::platform::get_models_dir()
+                };
+
                 // Load WhisperRS configuration from environment or use default location
                 let model_path = std::env::var("WHISPER_MODEL_PATH")
                     .ok()
@@ -281,9 +297,8 @@ impl VoiceAssistant {
                         }
                     })
                     .or_else(|| {
-                        // Try to find the model in the default data directory
-                        let models_dir = crate::utils::platform::get_models_dir();
-                        let model_file = models_dir.join("ggml-large-v3-turbo.bin");
+                        // Try to find the model in the data directory
+                        let model_file = models_dir.join("ggml-large-v3-turbo-q5_0.bin");
                         if model_file.exists() {
                             Some(model_file.to_string_lossy().to_string())
                         } else {
@@ -291,37 +306,28 @@ impl VoiceAssistant {
                         }
                     })
                     .or_else(|| {
-                        // Try to find models in the default data directory
-                        let models_dir = crate::utils::platform::get_models_dir();
+                        // Try to find models in the data directory
                         println!("🔍 Searching for models in: {}", models_dir.display());
 
-                        // Try different models in order of preference (添加 large-v2)
+                        // Try different models in order of preference
                         let model_preferences = [
-                            "ggml-large-v2.bin",         // 🔥 用户选择的模型
-                            "ggml-large-v3-turbo.bin",     // ~1570MB - highest quality
-                            "ggml-large-v3.bin",          // ~2950MB - v3模型
-                            "ggml-small.bin",             // ~467MB - 平衡
-                            "ggml-base.bin",              // ~148MB - 最快
+                            "ggml-large-v3-turbo-q5_0.bin",
+                            "ggml-large-v3-turbo.bin",
+                            "ggml-large-v2.bin",
+                            "ggml-large-v3.bin",
+                            "ggml-small.bin",
+                            "ggml-base.bin",
                         ];
 
                         for model in model_preferences {
                             let model_file = models_dir.join(model);
                             if model_file.exists() {
-                                println!("✅ Found model: {} ({}MB)",
-                                        model,
-                                        match model {
-                                            "ggml-large-v2.bin" => "1550",
-                                            "ggml-large-v3-turbo.bin" => "1570",
-                                            "ggml-large-v3.bin" => "2950",
-                                            "ggml-small.bin" => "467",
-                                            "ggml-base.bin" => "148",
-                                            _ => "unknown",
-                                        });
+                                println!("✅ Found model: {}", model);
                                 return Some(model_file.to_string_lossy().to_string());
                             }
                         }
 
-                        // 如果上述模型都没找到，列出目录中的所有.bin文件
+                        // If no preferred models found, scan all .bin files
                         println!("⚠️ No preferred models found, searching for any .bin files...");
                         if let Ok(entries) = std::fs::read_dir(&models_dir) {
                             for entry in entries.flatten() {
@@ -335,12 +341,12 @@ impl VoiceAssistant {
 
                         None
                     })
-                    .unwrap_or_else(|| {
-                        println!("⚠️ No Whisper model found. Please download a model to {:?}", crate::utils::platform::get_models_dir());
+                    .ok_or_else(|| {
+                        println!("⚠️ Whisper model not found. Please download a model to {}/", models_dir.display());
                         println!("💡 Recommended models for CPU: ggml-base.bin (fastest) or ggml-small.bin (balanced)");
                         println!("📥 Download from: https://huggingface.co/ggerganov/whisper.cpp/tree/main");
-                        "./models/ggml-base.bin".to_string()
-                    });
+                        VoiceError::Other("Whisper model not found".to_string())
+                    })?;
 
                 println!("🎯 Using Whisper model: {}", model_path);
 
@@ -503,6 +509,7 @@ impl VoiceAssistant {
 
         Ok(Self {
             config,
+            app_handle,
             asr_processor: Some(asr_processor),
             translate_processor,
             keyboard_manager,
@@ -566,11 +573,12 @@ impl VoiceAssistant {
 
                         // Try different models in order of preference
                         let model_preferences = [
-                            "ggml-large-v2.bin",         // 🔥 用户选择的模型
+                            "ggml-large-v3-turbo-q5_0.bin", // ~990MB - Q5_0 quantized
                             "ggml-large-v3-turbo.bin",     // ~1570MB
-                            "ggml-large-v3.bin",          // ~2950MB
-                            "ggml-small.bin",             // ~467MB
-                            "ggml-base.bin",              // ~148MB
+                            "ggml-large-v2.bin",           // ~1550MB
+                            "ggml-large-v3.bin",           // ~2950MB
+                            "ggml-small.bin",              // ~467MB
+                            "ggml-base.bin",               // ~148MB
                         ];
 
                         for model in model_preferences {
@@ -1008,7 +1016,7 @@ fn get_voice_assistant_instance() -> &'static Arc<Mutex<Option<VoiceAssistant>>>
 
 // Tauri commands - Real implementation
 #[tauri::command]
-pub async fn start_voice_assistant() -> Result<String, String> {
+pub async fn start_voice_assistant(app_handle: tauri::AppHandle) -> Result<String, String> {
     info!("🚀 Start VoiceAssistant command called");
 
     let instance = get_voice_assistant_instance();
@@ -1022,8 +1030,8 @@ pub async fn start_voice_assistant() -> Result<String, String> {
         }
     }
 
-    // Create new VoiceAssistant
-    match VoiceAssistant::new().await {
+    // Create new VoiceAssistant with AppHandle
+    match VoiceAssistant::new_with_handle(Some(app_handle)).await {
         Ok(mut assistant) => {
             // Start the assistant
             match assistant.start().await {

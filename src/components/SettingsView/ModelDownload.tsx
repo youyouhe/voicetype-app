@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Download, Trash2, Play, Check, AlertCircle, Loader2, HardDrive } from 'lucide-react';
+import { Download, Trash2, Play, Check, AlertCircle, Loader2, HardDrive, Globe } from 'lucide-react';
 import { TauriService } from '../../services/tauriService';
 import { useLanguage } from '../../contexts/LanguageContext';
 
@@ -24,11 +24,21 @@ interface ModelStats {
   models_dir: string;
 }
 
+interface DownloadSite {
+  id: string;
+  name: string;
+  base_url: string;
+}
+
 // Model descriptions mapping for i18n
 const MODEL_DESCRIPTIONS: Record<string, { zh: string; en: string }> = {
   'large-v3-turbo': {
     zh: '最新的高效模型，在保持高准确性的同时显著提升推理速度，适合生产环境使用',
     en: 'The latest efficient model that significantly improves inference speed while maintaining high accuracy, suitable for production use'
+  },
+  'large-v3-turbo-q5_0': {
+    zh: 'Turbo模型的Q5_0量化版本，体积更小但保持高准确性，推荐用于存储空间有限的设备',
+    en: 'Q5_0 quantized version of Turbo model with smaller size while maintaining high accuracy, recommended for devices with limited storage'
   },
   'large-v2': {
     zh: '成熟稳定的模型，具有良好的准确性和兼容性',
@@ -53,11 +63,14 @@ export const ModelDownload: React.FC = () => {
   const [activeModel, setActiveModel] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadSites, setDownloadSites] = useState<DownloadSite[]>([]);
+  const [testingSites, setTestingSites] = useState(false);
 
   // Load models and stats
   useEffect(() => {
     loadModels();
     loadStats();
+    loadDownloadSites();
     
     // Set up event listeners for download progress
     const setupEventListeners = async () => {
@@ -146,6 +159,30 @@ export const ModelDownload: React.FC = () => {
       setStats(statsData);
     } catch (error) {
       console.error('Failed to load stats:', error);
+    }
+  };
+
+  const loadDownloadSites = async () => {
+    try {
+      const sites = await TauriService.getDownloadSites();
+      setDownloadSites(sites);
+      console.log('📡 Available download sites:', sites);
+    } catch (error) {
+      console.error('Failed to load download sites:', error);
+    }
+  };
+
+  const handleTestSites = async () => {
+    setTestingSites(true);
+    try {
+      const accessibleSites = await TauriService.testDownloadSites();
+      console.log('✅ Accessible sites:', accessibleSites);
+      setDownloadSites(accessibleSites);
+    } catch (error) {
+      console.error('Failed to test sites:', error);
+      setError('Failed to test download sites');
+    } finally {
+      setTestingSites(false);
     }
   };
 
@@ -323,6 +360,54 @@ export const ModelDownload: React.FC = () => {
           <span className="text-red-700 dark:text-red-300 text-sm">{error}</span>
         </div>
       )}
+
+      {/* Download Site Information */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center">
+            <Globe className="w-5 h-5 text-blue-500 dark:text-blue-400 mr-2" />
+            <div>
+              <h4 className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                {language === 'zh-CN' ? '下载源' : 'Download Source'}
+              </h4>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                {language === 'zh-CN'
+                  ? '系统将自动检测并选择最快的下载源'
+                  : 'System will automatically detect and use the fastest download source'}
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={handleTestSites}
+            disabled={testingSites}
+            className="px-3 py-1.5 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors flex items-center"
+          >
+            {testingSites ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                {language === 'zh-CN' ? '检测中...' : 'Testing...'}
+              </>
+            ) : (
+              <>
+                <Globe className="w-4 h-4 mr-1" />
+                {language === 'zh-CN' ? '测试连接' : 'Test Connection'}
+              </>
+            )}
+          </button>
+        </div>
+        {downloadSites.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {downloadSites.map((site) => (
+              <span
+                key={site.id}
+                className="px-2 py-1 bg-white dark:bg-slate-800 text-xs text-gray-700 dark:text-gray-300 rounded border border-blue-200 dark:border-blue-700"
+              >
+                {site.name}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Statistics */}
       {stats && (
