@@ -23,6 +23,11 @@ pub struct KeyboardManager {
     save_wav_files: Arc<Mutex<bool>>,
     // 延迟配置
     typing_delays: Arc<Mutex<TypingDelays>>,
+    // 流式支持字段
+    streaming_session: Arc<Mutex<Option<Box<dyn crate::voice_assistant::StreamingAsrSession>>>>,
+    streaming_enabled: Arc<Mutex<bool>>,
+    streaming_chunk_interval_ms: Arc<Mutex<u64>>,
+    streaming_last_process_time: Arc<Mutex<Option<Instant>>>,
 }
 
 impl KeyboardManager {
@@ -42,6 +47,11 @@ impl KeyboardManager {
             original_clipboard: Arc::new(Mutex::new(None)),
             save_wav_files: Arc::new(Mutex::new(false)), // Default to false
             typing_delays: Arc::new(Mutex::new(TypingDelays::default())),
+            // 流式字段初始化
+            streaming_session: Arc::new(Mutex::new(None)),
+            streaming_enabled: Arc::new(Mutex::new(false)),
+            streaming_chunk_interval_ms: Arc::new(Mutex::new(500)),
+            streaming_last_process_time: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -233,7 +243,7 @@ impl KeyboardManager {
                     EventType::KeyRelease(key) => {
                         // 🔥 优化：在非录音状态下，提前返回忽略所有按键释放事件
                         let current_state = *state.lock().unwrap();
-                        if !matches!(current_state, InputState::Recording | InputState::RecordingTranslate | InputState::Idle) {
+                        if !matches!(current_state, InputState::Recording | InputState::RecordingTranslate | InputState::Streaming | InputState::Idle) {
                             // 在Processing/Translating等状态下，完全忽略按键释放
                             return;
                         }
@@ -247,7 +257,7 @@ impl KeyboardManager {
                         if keys.is_empty() {
                             hotkey_press_time = None;
 
-                            // 检查是否在录音状态，如果是，则转换到处理状态
+                            // 检查是否在录音/流式状态，如果是，则转换到处理状态
                             match current_state {
                                 InputState::Recording => {
                                     println!("🎤 Transcribe hotkey released - switching to Processing state...");
@@ -260,6 +270,12 @@ impl KeyboardManager {
                                     *state.lock().unwrap() = InputState::Translating;
                                     // Emit state change event
                                     crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Translating);
+                                }
+                                InputState::Streaming => {
+                                    println!("🎯 Streaming hotkey released - finalizing streaming...");
+                                    *state.lock().unwrap() = InputState::StreamingFinalizing;
+                                    // Emit state change event
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::StreamingFinalizing);
                                 }
                                 _ => {}
                             }
@@ -462,6 +478,54 @@ impl KeyboardManager {
                             *state.lock().unwrap() = InputState::Idle;
                         // Emit state change event
                         crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Idle);
+                        }
+                        // ========== Streaming states ==========
+                        InputState::Streaming => {
+                            println!("🎯 Streaming state - starting streaming session...");
+                            Self::start_recording_internal(&mut recorder, save_wav_files);
+                            // TODO: 启动流式会话
+                            // Self::start_streaming_session_internal(mode);
+                        }
+                        InputState::StreamingFinalizing => {
+                            println!("🎯 StreamingFinalizing state - processing remaining audio...");
+                            // TODO: 结束流式会话
+                            // Self::finalize_streaming_session();
+
+                            // 临时实现：使用批处理模式
+                            if let Some(ref mut rec) = recorder {
+                                println!("🛑 Stopping streaming recording...");
+                                let audio_data = rec.get_audio_data();
+                                match rec.stop_recording_with_option(save_wav_files) {
+                                    Ok(_) => {
+                                        match Self::convert_to_wav_bytes(&audio_data, rec.get_sample_rate()) {
+                                            Ok(wav_bytes) => {
+                                                use std::io::Cursor;
+                                                match _asr_processor.process_audio(Cursor::new(wav_bytes), crate::voice_assistant::Mode::Transcriptions, "") {
+                                                    Ok(result) => {
+                                                        println!("✅ Streaming final result: \"{}\"", result);
+                                                        Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result, None, &typing_delays_for_callback.lock().unwrap());
+                                                    }
+                                                    Err(e) => {
+                                                        println!("❌ Streaming final ASR failed: {}", e);
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                println!("❌ Streaming audio conversion failed: {}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        println!("❌ Failed to stop streaming recording: {}", e);
+                                    }
+                                }
+                            }
+
+                            // Reset state
+                            recording_started = false;
+                            *hotkey_start_time.lock().unwrap() = None;
+                            *state.lock().unwrap() = InputState::Idle;
+                            crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Idle);
                         }
                         _ => {}
                     }
@@ -1432,6 +1496,127 @@ fn set_clipboard_content(text: &str) {
 
             // As a last resort, just print to stdout so user can see it
             println!("📋 Text to copy manually: {}", text);
+        }
+    }
+
+    // ========== Streaming support methods ==========
+
+    /// 设置是否启用流式模式
+    pub fn set_streaming_enabled(&self, enabled: bool) {
+        *self.streaming_enabled.lock().unwrap() = enabled;
+        println!("🔄 Streaming mode: {}", if enabled { "ENABLED" } else { "DISABLED" });
+    }
+
+    /// 设置流式处理间隔（毫秒）
+    pub fn set_streaming_chunk_interval(&self, interval_ms: u64) {
+        *self.streaming_chunk_interval_ms.lock().unwrap() = interval_ms;
+    }
+
+    /// 启动流式会话
+    pub fn start_streaming_session_internal(&self, mode: crate::voice_assistant::Mode) -> Result<(), VoiceError> {
+        match self.asr_processor.start_streaming_session(mode) {
+            Ok(session) => {
+                *self.streaming_session.lock().unwrap() = Some(session);
+                println!("✅ Streaming session started");
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to start streaming session: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// 结束流式会话
+    pub fn finalize_streaming_session(&self) -> Result<String, VoiceError> {
+        if let Some(session) = self.streaming_session.lock().unwrap().take() {
+            let final_text = session.finalize()?;
+            println!("✅ Streaming session finalized: \"{}\"", final_text);
+            Ok(final_text)
+        } else {
+            Ok(String::new())
+        }
+    }
+
+    /// 处理流式音频（在录音期间定期调用）
+    pub fn process_streaming_audio_internal(&self, audio_samples: &[f32], sample_rate: u32) {
+        // 检查是否应该处理（基于时间间隔）
+        let interval_ms = *self.streaming_chunk_interval_ms.lock().unwrap();
+        let now = Instant::now();
+        let should_process = if let Some(last_time) = *self.streaming_last_process_time.lock().unwrap() {
+            now.duration_since(last_time).as_millis() >= interval_ms as u128
+        } else {
+            true
+        };
+
+        if !should_process {
+            return;
+        }
+
+        *self.streaming_last_process_time.lock().unwrap() = Some(now);
+
+        // 处理音频
+        if let Some(ref session) = *self.streaming_session.lock().unwrap() {
+            // 注意：这里需要可变引用，但由于是在 Arc<Mutex> 中，需要特殊处理
+            // 简化实现：暂时使用借用检查器友好的方式
+            println!("🎯 Processing streaming audio chunk: {} samples", audio_samples.len());
+            // TODO: 实际实现需要重新设计流式会话的访问模式
+        }
+    }
+
+    /// 增量打字（追加，不删除现有内容）
+    pub fn type_text_incremental(text: &str) {
+        println!("🎯 Streaming text: \"{}\"", text);
+
+        #[cfg(target_os = "linux")]
+        {
+            use std::process::Command;
+            use std::thread;
+            use std::time::Duration;
+
+            // 方法1: 使用 xdotool type（直接输入，无需剪贴板）
+            if let Ok(_) = Command::new("which").arg("xdotool").output() {
+                if let Ok(_) = Command::new("xdotool")
+                    .arg("type")
+                    .arg(text)
+                    .output()
+                {
+                    println!("✅ Text typed via xdotool type");
+                    return;
+                }
+            }
+
+            // 方法2: 使用 ydotool (Wayland)
+            if let Ok(_) = Command::new("which").arg("ydotool").output() {
+                if let Ok(_) = Command::new("ydotool")
+                    .arg("type")
+                    .arg(text)
+                    .output()
+                {
+                    println!("✅ Text typed via ydotool");
+                    return;
+                }
+            }
+
+            // 方法3: 回退到剪贴板
+            println!("⚠️ Falling back to clipboard method");
+            set_clipboard_content(text);
+            thread::sleep(Duration::from_millis(100));
+            simulate_ctrl_v();
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            // Windows: 使用 SendInput
+            // TODO: 实现 Windows 平台的增量打字
+            println!("⚠️ Windows streaming typing not yet implemented");
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            // macOS: 使用 osascript
+            // TODO: 实现 macOS 平台的增量打字
+            println!("⚠️ macOS streaming typing not yet implemented");
         }
     }
 }
