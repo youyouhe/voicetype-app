@@ -32,10 +32,14 @@ fn emit_voice_assistant_state_change(state: &InputState) {
                     InputState::RecordingTranslate => "RecordingTranslate".to_string(),
                     InputState::Processing => "Processing".to_string(),
                     InputState::Translating => "Translating".to_string(),
+                    // 新增流式状态
+                    InputState::Streaming => "Streaming".to_string(),
+                    InputState::StreamingPaused => "StreamingPaused".to_string(),
+                    InputState::StreamingFinalizing => "StreamingFinalizing".to_string(),
                     InputState::Error => "Error".to_string(),
                     InputState::Warning => "Warning".to_string(),
                 };
-                
+
                 if let Err(e) = handle.emit("voice-assistant-state-changed", &state_str) {
                     error!("Failed to emit voice assistant state change event: {}", e);
                 } else {
@@ -193,6 +197,30 @@ pub struct VoiceAssistantConfig {
     pub convert_to_simplified: bool,
     pub add_symbol: bool,
     pub optimize_result: bool,
+    // 流式配置
+    pub streaming_enabled: bool,
+    pub streaming_chunk_interval_ms: u64,
+    pub streaming_vad_threshold: f64,
+    pub streaming_min_speech_duration_ms: u64,
+    pub streaming_min_silence_duration_ms: u64,
+    pub streaming_max_segment_length_ms: u64,
+}
+
+impl VoiceAssistantConfig {
+    /// 获取流式配置
+    pub fn get_streaming_config(&self) -> crate::database::StreamingConfig {
+        crate::database::StreamingConfig {
+            id: String::new(),
+            enabled: self.streaming_enabled,
+            chunk_interval_ms: self.streaming_chunk_interval_ms as i64,
+            vad_threshold: self.streaming_vad_threshold,
+            min_speech_duration_ms: self.streaming_min_speech_duration_ms as i64,
+            min_silence_duration_ms: self.streaming_min_silence_duration_ms as i64,
+            max_segment_length_ms: self.streaming_max_segment_length_ms as i64,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
 }
 
 impl Default for VoiceAssistantConfig {
@@ -213,6 +241,31 @@ impl Default for VoiceAssistantConfig {
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()
                 .unwrap_or(true),
+            // 流式配置默认值
+            streaming_enabled: std::env::var("STREAMING_ENABLED")
+                .unwrap_or_else(|_| "false".to_string())
+                .parse()
+                .unwrap_or(false),
+            streaming_chunk_interval_ms: std::env::var("STREAMING_CHUNK_INTERVAL_MS")
+                .unwrap_or_else(|_| "500".to_string())
+                .parse()
+                .unwrap_or(500),
+            streaming_vad_threshold: std::env::var("STREAMING_VAD_THRESHOLD")
+                .unwrap_or_else(|_| "0.5".to_string())
+                .parse()
+                .unwrap_or(0.5),
+            streaming_min_speech_duration_ms: std::env::var("STREAMING_MIN_SPEECH_MS")
+                .unwrap_or_else(|_| "1000".to_string())
+                .parse()
+                .unwrap_or(1000),
+            streaming_min_silence_duration_ms: std::env::var("STREAMING_MIN_SILENCE_MS")
+                .unwrap_or_else(|_| "2000".to_string())
+                .parse()
+                .unwrap_or(2000),
+            streaming_max_segment_length_ms: std::env::var("STREAMING_MAX_SEGMENT_MS")
+                .unwrap_or_else(|_| "30000".to_string())
+                .parse()
+                .unwrap_or(30000),
         }
     }
 }
