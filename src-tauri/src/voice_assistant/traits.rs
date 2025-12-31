@@ -45,12 +45,39 @@ pub trait AsrProcessor {
         prompt: &str,
     ) -> Result<String, VoiceError>;
 
+    /// 启动流式会话 (用于实时边说边转录)
+    fn start_streaming_session(&self, mode: Mode) -> Result<Box<dyn StreamingAsrSession>, VoiceError> {
+        Err(VoiceError::Other("Streaming not supported by this processor".to_string()))
+    }
+
     fn get_processor_type(&self) -> Option<&str>;
 
     /// 显式卸载模型并释放GPU内存
     fn unload(&mut self) {
         // 默认实现：什么都不做
     }
+}
+
+/// 流式段落结果
+#[derive(Debug, Clone)]
+pub struct StreamingSegment {
+    pub text: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub is_final: bool,     // 此段落是否已最终确定（不会再修改）
+    pub should_type: bool,  // 是否应立即打字输出
+}
+
+/// 流式 ASR 会话 trait
+pub trait StreamingAsrSession: Send {
+    /// 处理音频块，返回检测到的语音段落
+    fn process_audio_chunk(&mut self, audio_samples: &[f32], sample_rate: u32) -> Result<Vec<StreamingSegment>, VoiceError>;
+
+    /// 结束会话（处理剩余音频）
+    fn finalize(&mut self) -> Result<String, VoiceError>;
+
+    /// 获取当前上下文 tokens（用于连续性）
+    fn get_context_tokens(&self) -> Vec<i32>;
 }
 
 pub trait TranslateProcessor {
@@ -66,10 +93,16 @@ pub trait KeyboardManagerTrait {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum InputState {
     Idle,
-    Recording,
-    RecordingTranslate,
-    Processing,
-    Translating,
+    Recording,           // F4 按下 - 批处理模式
+    RecordingTranslate,  // Shift+F4 按下 - 批处理模式
+    Processing,          // ASR 运行中 - 批处理模式
+    Translating,         // 翻译运行中 - 批处理模式
+
+    // 流式状态 (Streaming states)
+    Streaming,           // F4 按下 - 流式模式（边说边转录）
+    StreamingPaused,     // 流式暂停（用户静默时）
+    StreamingFinalizing, // 热键释放后的收尾处理
+
     Error,
     Warning,
 }
@@ -80,5 +113,13 @@ impl InputState {
     }
     pub fn can_start_recording(&self) -> bool {
         !self.is_recording()
+    }
+
+    // 流式状态检测
+    pub fn is_streaming(&self) -> bool {
+        matches!(self, Self::Streaming | Self::StreamingPaused | Self::StreamingFinalizing)
+    }
+    pub fn can_start_streaming(&self) -> bool {
+        !self.is_streaming() && !self.is_recording()
     }
 }
