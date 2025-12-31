@@ -1,10 +1,11 @@
 import React, { memo } from 'react';
-import { Mic, Keyboard, Sliders, Monitor, Download } from 'lucide-react';
+import { Mic, Keyboard, Sliders, Monitor, Download, Waves } from 'lucide-react';
 import { NavTab } from '../../types';
 import { ASRSettings, ShortcutSettings, PlaceholderSettings } from './SettingsContent';
 import { AdvancedSettings } from './AdvancedSettings';
 import { SystemInfoSettings } from './SystemInfoSettings';
 import { ModelDownload } from './ModelDownload';
+import { StreamingSettings } from './StreamingSettings';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 export interface SettingsViewProps {
@@ -19,6 +20,7 @@ export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setAct
     { id: 'asr', label: t.asrService, icon: Mic },
     { id: 'shortcuts', label: t.shortcuts, icon: Keyboard },
     { id: 'models', label: t.whisperModels, icon: Download },
+    { id: 'streaming', label: 'Streaming', icon: Waves },
     { id: 'advanced', label: t.advanced, icon: Sliders },
     { id: 'system', label: t.system, icon: Monitor },
   ];
@@ -55,6 +57,7 @@ export const SettingsView = memo<SettingsViewProps>(({ activeSettingsTab, setAct
         {activeSettingsTab === 'asr' && <ASRSettings />}
         {activeSettingsTab === 'shortcuts' && <ShortcutSettings />}
         {activeSettingsTab === 'models' && <ModelDownload />}
+        {activeSettingsTab === 'streaming' && <StreamingSettings />}
         {activeSettingsTab === 'advanced' && <AdvancedSettings />}
         {activeSettingsTab === 'system' && <SystemInfoSettings />}
       </main>

@@ -297,7 +297,11 @@ pub fn run() {
             set_preferred_gpu_backend,
             redetect_gpu_backends,
             get_backend_details,
-            test_backend_performance
+            test_backend_performance,
+            // Streaming configuration commands
+            get_streaming_config,
+            save_streaming_config,
+            toggle_streaming_mode
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

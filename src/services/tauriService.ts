@@ -157,3 +157,31 @@ export interface NvidiaDriverInfo {
   gpu_name: string | null;
   error_message: string | null;
 }
+
+// Streaming Configuration Types
+export interface StreamingConfig {
+  enabled: boolean;
+  chunk_interval_ms: number;
+  vad_threshold: number;
+  min_speech_duration_ms: number;
+  min_silence_duration_ms: number;
+  max_segment_length_ms: number;
+}
+
+// Extend TauriService with streaming methods
+export class TauriService {
+  // ... existing methods ...
+
+  // Streaming configuration methods
+  static async getStreamingConfig(): Promise<StreamingConfig | null> {
+    return await invoke<StreamingConfig | null>('get_streaming_config');
+  }
+
+  static async saveStreamingConfig(config: StreamingConfig): Promise<StreamingConfig> {
+    return await invoke<StreamingConfig>('save_streaming_config', { request: config });
+  }
+
+  static async toggleStreamingMode(enabled: boolean): Promise<boolean> {
+    return await invoke<boolean>('toggle_streaming_mode', { enabled });
+  }
+}
