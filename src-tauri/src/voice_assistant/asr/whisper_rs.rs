@@ -563,6 +563,16 @@ impl AsrProcessor for WhisperRSProcessor {
         self.process_audio_data_with_mode(&audio_data, mode)
     }
 
+    /// 启动流式会话
+    fn start_streaming_session(&self, mode: Mode) -> Result<Box<dyn crate::voice_assistant::StreamingAsrSession>, VoiceError> {
+        let ctx = self.ctx.as_ref()
+            .ok_or_else(|| VoiceError::Other("WhisperContext not loaded".to_string()))?
+            .clone();
+
+        let session = WhisperStreamingSession::new(ctx, mode, &self.config)?;
+        Ok(Box::new(session))
+    }
+
     fn get_processor_type(&self) -> Option<&str> {
         Some("whisper-rs")
     }
@@ -841,6 +851,307 @@ impl WhisperRSProcessor {
             output_format: OutputFormat::Text,
         };
         Self::new(config)
+    }
+}
+
+// ==================== Streaming Session Implementation ====================
+
+/// VAD 段落信息
+struct VadSegmentInfo {
+    start_sample: usize,
+    end_sample: usize,
+    start_ms: u64,
+    end_ms: u64,
+    is_complete: bool,
+}
+
+/// 转录结果
+struct TranscriptionResult {
+    text: String,
+    tokens: Vec<i32>,
+}
+
+/// Whisper 流式会话
+pub struct WhisperStreamingSession {
+    ctx: Arc<WhisperContext>,
+    state: WhisperState,
+    mode: Mode,
+    params: FullParams<'static, 'static>,
+
+    // VAD 配置
+    vad_threshold: f32,              // 语音能量阈值 (默认 0.5)
+    min_speech_duration_ms: u64,     // 最小语音时长 (默认 1000ms)
+    min_silence_duration_ms: u64,    // 最小静默时长 (默认 2000ms)
+    max_segment_length_ms: u64,      // 最大段落长度 (默认 30000ms)
+
+    // 音频缓冲区
+    audio_buffer: Vec<f32>,
+    sample_rate: u32,
+    last_speech_end: Option<usize>,
+
+    // 状态跟踪
+    in_speech: bool,
+    speech_start_sample: usize,
+    last_transcribed_sample: usize,
+
+    // 上下文管理
+    context_tokens: Vec<i32>,
+    max_context_tokens: usize,
+}
+
+impl WhisperStreamingSession {
+    pub fn new(ctx: Arc<WhisperContext>, mode: Mode, config: &WhisperRSConfig) -> Result<Self, VoiceError> {
+        let state = ctx.create_state()
+            .map_err(|e| VoiceError::Other(format!("Failed to create whisper state: {}", e)))?;
+
+        let params = Self::create_streaming_params(mode, config);
+
+        Ok(Self {
+            ctx,
+            state,
+            mode,
+            params,
+            vad_threshold: 0.5f32,
+            min_speech_duration_ms: 1000,
+            min_silence_duration_ms: 2000,
+            max_segment_length_ms: 30000,
+            audio_buffer: Vec::new(),
+            sample_rate: 16000, // Whisper 期望 16kHz
+            last_speech_end: None,
+            in_speech: false,
+            speech_start_sample: 0,
+            last_transcribed_sample: 0,
+            context_tokens: Vec::new(),
+            max_context_tokens: 224, // Whisper 的上下文窗口
+        })
+    }
+
+    fn create_streaming_params(_mode: Mode, _config: &WhisperRSConfig) -> FullParams<'static, 'static> {
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+
+        // 流式特定设置
+        let num_threads = std::thread::available_parallelism()
+            .map(|n| n.get() as i32)
+            .unwrap_or(4);
+        params.set_n_threads(num_threads);
+
+        params.set_language(None); // 自动检测
+        params.set_no_context(false); // 启用上下文连续性
+        params.set_single_segment(false); // 允许多个段落
+
+        params.set_print_timestamps(false);
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+
+        params
+    }
+
+    /// 处理音频块
+    pub fn process_audio_chunk(&mut self, audio_samples: &[f32], sample_rate: u32) -> Result<Vec<crate::voice_assistant::StreamingSegment>, VoiceError> {
+        // 1. 重采样到 16kHz
+        let resampled = self.resample_to_16khz(audio_samples, sample_rate);
+
+        // 2. 追加到缓冲区
+        let start_idx = self.audio_buffer.len();
+        self.audio_buffer.extend_from_slice(&resampled);
+
+        // 3. 运行 VAD 检测语音段落
+        let speech_segments = self.detect_vad_segments(start_idx)?;
+
+        // 4. 转录完成的段落
+        let mut results = Vec::new();
+
+        for segment in speech_segments {
+            if segment.is_complete {
+                let segment_audio = &self.audio_buffer[segment.start_sample..segment.end_sample];
+
+                match self.transcribe_segment(segment_audio) {
+                    Ok(transcription) => {
+                        if !transcription.text.is_empty() {
+                            // 更新上下文
+                            self.context_tokens.extend_from_slice(&transcription.tokens);
+                            if self.context_tokens.len() > self.max_context_tokens {
+                                let keep = self.max_context_tokens / 2;
+                                self.context_tokens = self.context_tokens[keep..].to_vec();
+                            }
+                            self.last_transcribed_sample = segment.end_sample;
+
+                            results.push(crate::voice_assistant::StreamingSegment {
+                                text: transcription.text,
+                                start_ms: segment.start_ms,
+                                end_ms: segment.end_ms,
+                                is_final: true,
+                                should_type: true,
+                            });
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("Segment transcription failed: {}", e);
+                    }
+                }
+            }
+        }
+
+        // 5. 清理旧音频数据（保留最近 60 秒作为上下文）
+        if self.audio_buffer.len() > self.sample_rate as usize * 60 {
+            let keep_len = self.sample_rate as usize * 60;
+            let remove_len = self.audio_buffer.len() - keep_len;
+            self.audio_buffer = self.audio_buffer[remove_len..].to_vec();
+            self.last_transcribed_sample = self.last_transcribed_sample.saturating_sub(remove_len);
+            if let Some(ref mut last_speech_end) = self.last_speech_end {
+                *last_speech_end = last_speech_end.saturating_sub(remove_len);
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// VAD 检测语音段落
+    fn detect_vad_segments(&mut self, _start_idx: usize) -> Result<Vec<VadSegmentInfo>, VoiceError> {
+        let mut segments = Vec::new();
+
+        // 使用 100ms 窗口处理音频
+        let window_size = (self.sample_rate as f64 * 0.1) as usize; // 100ms
+        let step_size = window_size / 2; // 50% 重叠
+
+        if self.audio_buffer.len() < window_size {
+            return Ok(segments);
+        }
+
+        let mut i = self.last_transcribed_sample;
+        while i + window_size <= self.audio_buffer.len() {
+            let window = &self.audio_buffer[i..i + window_size];
+            let energy = self.calculate_energy(window);
+
+            if energy > self.vad_threshold {
+                // 检测到语音
+                if !self.in_speech {
+                    self.in_speech = true;
+                    self.speech_start_sample = i;
+                }
+            } else {
+                // 检测到静默
+                if self.in_speech {
+                    let silence_samples = (self.sample_rate as f64 * (self.min_silence_duration_ms as f64 / 1000.0)) as usize;
+
+                    // 检查静默持续时间是否足够长
+                    if i > self.speech_start_sample + silence_samples {
+                        // 计算最小语音时长要求
+                        let min_speech_samples = (self.sample_rate as f64 * (self.min_speech_duration_ms as f64 / 1000.0)) as usize;
+
+                        if i - self.speech_start_sample >= min_speech_samples {
+                            // 语音段落完成
+                            let start_ms = (self.speech_start_sample as f64 / self.sample_rate as f64 * 1000.0) as u64;
+                            let end_ms = (i as f64 / self.sample_rate as f64 * 1000.0) as u64;
+
+                            segments.push(VadSegmentInfo {
+                                start_sample: self.speech_start_sample,
+                                end_sample: i,
+                                start_ms,
+                                end_ms,
+                                is_complete: true,
+                            });
+
+                            self.last_speech_end = Some(i);
+                        }
+
+                        self.in_speech = false;
+                    }
+                }
+            }
+
+            i += step_size;
+        }
+
+        Ok(segments)
+    }
+
+    fn calculate_energy(&self, samples: &[f32]) -> f32 {
+        if samples.is_empty() {
+            return 0.0;
+        }
+        let sum: f32 = samples.iter().map(|&x| x * x).sum();
+        (sum / samples.len() as f64).sqrt() as f32
+    }
+
+    fn resample_to_16khz(&self, audio: &[f32], original_rate: u32) -> Vec<f32> {
+        if original_rate == 16000 {
+            return audio.to_vec();
+        }
+
+        let ratio = 16000.0 / original_rate as f32;
+        let new_len = (audio.len() as f32 * ratio).ceil() as usize;
+        let mut resampled = Vec::with_capacity(new_len);
+
+        for i in 0..new_len {
+            let src_idx = (i as f32 / ratio) as usize;
+            resampled.push(audio[src_idx.min(audio.len() - 1)]);
+        }
+
+        resampled
+    }
+
+    fn transcribe_segment(&mut self, audio: &[f32]) -> Result<TranscriptionResult, VoiceError> {
+        // 重置状态
+        self.state.reset();
+
+        // 运行推理
+        self.state.full(self.params.clone(), audio)
+            .map_err(|e| VoiceError::Other(format!("Whisper inference failed: {}", e)))?;
+
+        // 提取文本
+        let num_segments = self.state.full_n_segments()
+            .map_err(|e| VoiceError::Other(format!("Failed to get number of segments: {}", e)))?;
+
+        let mut text = String::new();
+        let mut tokens = Vec::new();
+
+        for i in 0..num_segments {
+            let segment_text = self.state.full_get_segment_text(i)
+                .map_err(|e| VoiceError::Other(format!("Failed to get segment text: {}", e)))?;
+
+            text.push_str(&segment_text);
+            text.push(' ');
+
+            // TODO: 收集 tokens (需要查看 whisper-rs API)
+        }
+
+        Ok(TranscriptionResult {
+            text: text.trim().to_string(),
+            tokens,
+        })
+    }
+
+    /// 结束会话（处理剩余音频）
+    pub fn finalize(&mut self) -> Result<String, VoiceError> {
+        if self.in_speech && self.audio_buffer.len() > self.speech_start_sample {
+            let remaining_audio = &self.audio_buffer[self.speech_start_sample..];
+            let result = self.transcribe_segment(remaining_audio)?;
+            Ok(result.text)
+        } else {
+            Ok(String::new())
+        }
+    }
+
+    /// 获取当前上下文 tokens
+    pub fn get_context_tokens(&self) -> Vec<i32> {
+        self.context_tokens.clone()
+    }
+}
+
+// 实现 StreamingAsrSession trait
+impl crate::voice_assistant::StreamingAsrSession for WhisperStreamingSession {
+    fn process_audio_chunk(&mut self, audio_samples: &[f32], sample_rate: u32) -> Result<Vec<crate::voice_assistant::StreamingSegment>, VoiceError> {
+        self.process_audio_chunk(audio_samples, sample_rate)
+    }
+
+    fn finalize(&mut self) -> Result<String, VoiceError> {
+        self.finalize()
+    }
+
+    fn get_context_tokens(&self) -> Vec<i32> {
+        self.get_context_tokens()
     }
 }
 

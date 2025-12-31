@@ -30,6 +30,36 @@ pub struct TypingDelays {
     pub short_operation_ms: i64,
 }
 
+// 流式配置结构体
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct StreamingConfig {
+    pub id: String,
+    pub enabled: bool,                   // 是否启用流式（默认 false）
+    pub chunk_interval_ms: i64,          // 处理间隔（默认 500ms）
+    pub vad_threshold: f64,              // VAD 阈值（默认 0.5）
+    pub min_speech_duration_ms: i64,     // 最小语音时长（默认 1000ms）
+    pub min_silence_duration_ms: i64,    // 最小静默时长（默认 2000ms）
+    pub max_segment_length_ms: i64,      // 最大段落长度（默认 30000ms）
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for StreamingConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            enabled: false,              // 默认关闭，需手动启用
+            chunk_interval_ms: 500,
+            vad_threshold: 0.5,
+            min_speech_duration_ms: 1000,
+            min_silence_duration_ms: 2000,
+            max_segment_length_ms: 30000,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
 impl Default for TypingDelays {
     fn default() -> Self {
         Self {
@@ -375,6 +405,25 @@ impl Database {
         .execute(&*self.pool)
         .await
         .ok(); // Ignore error if column already exists
+
+        // Create streaming_config table for streaming ASR settings
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS streaming_config (
+                id TEXT PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                chunk_interval_ms INTEGER NOT NULL DEFAULT 500,
+                vad_threshold REAL NOT NULL DEFAULT 0.5,
+                min_speech_duration_ms INTEGER NOT NULL DEFAULT 1000,
+                min_silence_duration_ms INTEGER NOT NULL DEFAULT 2000,
+                max_segment_length_ms INTEGER NOT NULL DEFAULT 30000,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&*self.pool)
+        .await?;
 
         sqlx::query(
             r#"
@@ -1020,6 +1069,83 @@ impl Database {
     pub async fn get_today_usage(&self) -> Result<Option<UsageLog>, sqlx::Error> {
         let today = Utc::now().format("%Y-%m-%d").to_string();
         self.get_usage_data(&today).await
+    }
+
+    // ========== Streaming Configuration methods ==========
+    pub async fn get_streaming_config(&self) -> Result<Option<StreamingConfig>, sqlx::Error> {
+        let config = sqlx::query_as::<_, StreamingConfig>(
+            "SELECT * FROM streaming_config ORDER BY updated_at DESC LIMIT 1"
+        )
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        Ok(config)
+    }
+
+    pub async fn save_streaming_config(
+        &self,
+        enabled: bool,
+        chunk_interval_ms: i64,
+        vad_threshold: f64,
+        min_speech_duration_ms: i64,
+        min_silence_duration_ms: i64,
+        max_segment_length_ms: i64,
+    ) -> Result<StreamingConfig, sqlx::Error> {
+        let now = Utc::now();
+
+        // Try to update existing record first
+        let update_result = sqlx::query_as::<_, StreamingConfig>(
+            r#"
+            UPDATE streaming_config
+            SET enabled = $1,
+                chunk_interval_ms = $2,
+                vad_threshold = $3,
+                min_speech_duration_ms = $4,
+                min_silence_duration_ms = $5,
+                max_segment_length_ms = $6,
+                updated_at = $7
+            WHERE id = (SELECT id FROM streaming_config ORDER BY updated_at DESC LIMIT 1)
+            RETURNING *
+            "#
+        )
+        .bind(enabled)
+        .bind(chunk_interval_ms)
+        .bind(vad_threshold)
+        .bind(min_speech_duration_ms)
+        .bind(min_silence_duration_ms)
+        .bind(max_segment_length_ms)
+        .bind(now)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        if let Some(config) = update_result {
+            info!("Updated streaming config");
+            Ok(config)
+        } else {
+            // Insert new record
+            let id = Uuid::new_v4().to_string();
+            let config = sqlx::query_as::<_, StreamingConfig>(
+                r#"
+                INSERT INTO streaming_config (id, enabled, chunk_interval_ms, vad_threshold, min_speech_duration_ms, min_silence_duration_ms, max_segment_length_ms, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING *
+                "#
+            )
+            .bind(&id)
+            .bind(enabled)
+            .bind(chunk_interval_ms)
+            .bind(vad_threshold)
+            .bind(min_speech_duration_ms)
+            .bind(min_silence_duration_ms)
+            .bind(max_segment_length_ms)
+            .bind(now)
+            .bind(now)
+            .fetch_one(&*self.pool)
+            .await?;
+
+            info!("Created new streaming config");
+            Ok(config)
+        }
     }
 }
 

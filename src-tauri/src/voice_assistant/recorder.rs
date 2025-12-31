@@ -370,6 +370,40 @@ impl AudioRecorder {
         self.sample_rate
     }
 
+    // ========== Streaming support methods ==========
+
+    /// 获取已录制的音频块（用于流式处理）
+    /// 这个方法会克隆当前缓冲区的音频数据，用于传递给流式处理器
+    pub fn get_recorded_audio_chunk(&self) -> Vec<f32> {
+        if let Some(audio_data_arc) = &self.recording_audio_data {
+            if let Ok(buffer) = audio_data_arc.lock() {
+                return buffer.clone();
+            }
+        }
+        self.audio_data.clone()
+    }
+
+    /// 清空录制缓冲区（流式块处理完成后调用）
+    /// 注意：这会清空所有已录制但未处理的音频数据
+    pub fn clear_recording_buffer(&mut self) {
+        if let Some(audio_data_arc) = &self.recording_audio_data {
+            if let Ok(mut buffer) = audio_data_arc.lock() {
+                buffer.clear();
+            }
+        }
+        self.audio_data.clear();
+    }
+
+    /// 获取当前缓冲区的音频样本数量
+    pub fn get_buffer_length(&self) -> usize {
+        if let Some(audio_data_arc) = &self.recording_audio_data {
+            if let Ok(buffer) = audio_data_arc.lock() {
+                return buffer.len();
+            }
+        }
+        self.audio_data.len()
+    }
+
     /// 验证WAV文件格式 - 用于调试
     pub fn verify_wav_file_format(&self, file_path: &str) -> Result<(), VoiceError> {
         use std::fs::File;
