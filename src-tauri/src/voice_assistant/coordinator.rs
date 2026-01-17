@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::collections::HashMap;
 use std::sync::OnceLock;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, State};
 use crate::voice_assistant::{
     AsrProcessor, TranslateProcessor,
     AudioRecorder, KeyboardManager, Mode, InputState, VoiceError,
@@ -9,6 +9,7 @@ use crate::voice_assistant::{
     SiliconFlowTranslateProcessor, OllamaTranslateProcessor,
     WhisperRSProcessor // , EnhancedWhisperProcessor
 };
+use crate::commands::DatabaseState;
 use tracing::{info, error};
 
 // Global VoiceAssistant instance
@@ -1127,7 +1128,7 @@ fn get_voice_assistant_instance() -> &'static Arc<Mutex<Option<VoiceAssistant>>>
 
 // Tauri commands - Real implementation
 #[tauri::command]
-pub async fn start_voice_assistant(app_handle: tauri::AppHandle) -> Result<String, String> {
+pub async fn start_voice_assistant(app_handle: tauri::AppHandle, db_state: State<'_, DatabaseState>) -> Result<String, String> {
     info!("🚀 Start VoiceAssistant command called");
 
     let instance = get_voice_assistant_instance();
@@ -1153,6 +1154,21 @@ pub async fn start_voice_assistant(app_handle: tauri::AppHandle) -> Result<Strin
                         *va = Some(assistant);
                     }
                     info!("✅ VoiceAssistant started successfully");
+
+                    // Update service status in database (clone and drop lock before await)
+                    let db_clone = {
+                        let guard = db_state.lock().unwrap();
+                        guard.as_ref().cloned()
+                    };
+
+                    if let Some(db) = db_clone {
+                        if let Err(e) = db.update_service_status("local_asr", "online", None).await {
+                            error!("Failed to update service status: {}", e);
+                        } else {
+                            info!("✅ Updated service status in database: local_asr -> online");
+                        }
+                    }
+
                     // Emit "Running" state to indicate VoiceAssistant service is active
                     // This matches the logic in get_voice_assistant_state()
                     if let Some(handle_guard) = APP_HANDLE.get() {
@@ -1162,6 +1178,10 @@ pub async fn start_voice_assistant(app_handle: tauri::AppHandle) -> Result<Strin
                                     error!("Failed to emit voice assistant state change event: {}", e);
                                 } else {
                                     info!("✅ Emitted voice assistant state change: Running");
+                                }
+                                // Also emit service status update event
+                                if let Err(e) = handle.emit("service-status-updated", ()) {
+                                    error!("Failed to emit service status update event: {}", e);
                                 }
                             }
                         }
@@ -1182,44 +1202,65 @@ pub async fn start_voice_assistant(app_handle: tauri::AppHandle) -> Result<Strin
 }
 
 #[tauri::command]
-pub async fn stop_voice_assistant() -> Result<String, String> {
+pub async fn stop_voice_assistant(db_state: State<'_, DatabaseState>) -> Result<String, String> {
     info!("⏹️ Stop VoiceAssistant command called");
 
     let instance = get_voice_assistant_instance();
 
-    // Check if running
-    {
+    // Check if running and stop it (all sync operations)
+    let stop_result = {
         let mut va = instance.lock().unwrap();
         if va.is_none() {
             info!("⚠️ VoiceAssistant is not running");
             return Ok("VoiceAssistant is not running".to_string());
         }
 
-        // Stop and remove the instance
-        if let Some(mut assistant) = va.take() {
-            match assistant.stop() {
-                Ok(()) => {
-                    info!("✅ VoiceAssistant stopped successfully");
-                    // Emit stopped state - use "Idle" to indicate service is actually stopped
-                    if let Some(handle_guard) = APP_HANDLE.get() {
-                        if let Ok(app_handle) = handle_guard.lock() {
-                            if let Some(ref handle) = *app_handle {
-                                if let Err(e) = handle.emit("voice-assistant-state-changed", "Idle") {
-                                    error!("Failed to emit voice assistant state change event: {}", e);
-                                } else {
-                                    info!("✅ Emitted voice assistant state change: Idle (service stopped)");
-                                }
-                            }
-                        }
-                    }
-                    Ok("VoiceAssistant stopped successfully".to_string())
-                }
-                Err(e) => {
-                    error!("❌ Failed to stop VoiceAssistant: {}", e);
-                    Err(format!("Failed to stop VoiceAssistant: {}", e))
+        // Take the assistant out and stop it
+        va.take().map(|mut assistant| assistant.stop())
+    };
+
+    // Handle the stop result
+    match stop_result {
+        Some(Ok(())) => {
+            info!("✅ VoiceAssistant stopped successfully");
+
+            // Update service status in database (clone and drop lock before await)
+            let db_clone = {
+                let guard = db_state.lock().unwrap();
+                guard.as_ref().cloned()
+            };
+
+            if let Some(db) = db_clone {
+                if let Err(e) = db.update_service_status("local_asr", "offline", None).await {
+                    error!("Failed to update service status: {}", e);
+                } else {
+                    info!("✅ Updated service status in database: local_asr -> offline");
                 }
             }
-        } else {
+
+            // Emit stopped state - use "Idle" to indicate service is actually stopped
+            if let Some(handle_guard) = APP_HANDLE.get() {
+                if let Ok(app_handle) = handle_guard.lock() {
+                    if let Some(ref handle) = *app_handle {
+                        if let Err(e) = handle.emit("voice-assistant-state-changed", "Idle") {
+                            error!("Failed to emit voice assistant state change event: {}", e);
+                        } else {
+                            info!("✅ Emitted voice assistant state change: Idle (service stopped)");
+                        }
+                        // Also emit service status update event
+                        if let Err(e) = handle.emit("service-status-updated", ()) {
+                            error!("Failed to emit service status update event: {}", e);
+                        }
+                    }
+                }
+            }
+            Ok("VoiceAssistant stopped successfully".to_string())
+        }
+        Some(Err(e)) => {
+            error!("❌ Failed to stop VoiceAssistant: {}", e);
+            Err(format!("Failed to stop VoiceAssistant: {}", e))
+        }
+        None => {
             unreachable!() // We already checked it's Some
         }
     }

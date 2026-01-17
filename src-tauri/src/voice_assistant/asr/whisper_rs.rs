@@ -913,7 +913,6 @@ struct PendingSegment {
     audio: Vec<f32>,
     start_ms: u64,
     end_ms: u64,
-    start_sample: usize,
     end_sample: usize,
 }
 
@@ -1004,7 +1003,6 @@ impl WhisperStreamingSession {
                         audio: segment_audio,
                         start_ms: segment.start_ms,
                         end_ms: segment.end_ms,
-                        start_sample: segment.start_sample,
                         end_sample: segment.end_sample,
                     });
                 } else {
