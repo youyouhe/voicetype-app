@@ -45,3 +45,6 @@ nul
 # Claude
 .claude/
 [Step*
+
+# Serena
+.serena/

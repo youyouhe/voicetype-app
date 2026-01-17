@@ -11,6 +11,20 @@ AI Voice Assistant with local Whisper support and CUDA acceleration.
 - **Model Management** - Download and manage Whisper models
 - **Driver Compatibility Check** - Automatic NVIDIA driver version verification
 
+## Screenshots
+
+### Main Interface
+
+**中文界面** | **English Interface**
+:---:|:---:
+![中文界面](screen-zh.png) | ![English Interface](screen-en.png)
+
+### Settings
+
+**设置** | **Settings**
+:---:|:---:
+![设置](setting-zh.png) | ![Settings](setting-en.png)
+
 ## Requirements
 
 ### Hardware
