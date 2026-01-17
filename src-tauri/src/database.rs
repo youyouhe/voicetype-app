@@ -7,6 +7,9 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::sync::OnceLock;
 
+// Import platform utilities for consistent path handling
+use crate::utils::platform::get_database_dir;
+
 // Database models
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
 pub struct AsrConfig {
@@ -50,7 +53,7 @@ impl Default for StreamingConfig {
             id: String::new(),
             enabled: false,              // 默认关闭，需手动启用
             chunk_interval_ms: 500,
-            vad_threshold: 0.5,
+            vad_threshold: 0.02,         // 🔥 降低阈值以适应低音量麦克风 (原0.5太高)
             min_speech_duration_ms: 1000,
             min_silence_duration_ms: 2000,
             max_segment_length_ms: 30000,
@@ -219,12 +222,8 @@ impl Database {
         // 创建新连接池
         println!("🏗️ Database: Creating new global database pool...");
 
-        // Use a hidden directory to avoid triggering file watches
-        let app_dir = std::env::current_dir().unwrap().join(".tauri-data");
-        println!("📁 Database: App dir: {:?}", app_dir);
-        std::fs::create_dir_all(&app_dir).ok();
-
-        let db_dir = app_dir.join("databases");
+        // Use centralized database directory from platform module
+        let db_dir = get_database_dir();
         println!("📁 Database: DB dir: {:?}", db_dir);
         std::fs::create_dir_all(&db_dir).ok();
 
@@ -413,7 +412,7 @@ impl Database {
                 id TEXT PRIMARY KEY,
                 enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 chunk_interval_ms INTEGER NOT NULL DEFAULT 500,
-                vad_threshold REAL NOT NULL DEFAULT 0.5,
+                vad_threshold REAL NOT NULL DEFAULT 0.02,
                 min_speech_duration_ms INTEGER NOT NULL DEFAULT 1000,
                 min_silence_duration_ms INTEGER NOT NULL DEFAULT 2000,
                 max_segment_length_ms INTEGER NOT NULL DEFAULT 30000,
@@ -424,6 +423,19 @@ impl Database {
         )
         .execute(&*self.pool)
         .await?;
+
+        // 🔥 Migration: 更新过高的 VAD 阈值 (从 0.5 降低到 0.02)
+        sqlx::query(
+            r#"
+            UPDATE streaming_config
+            SET vad_threshold = 0.02,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE vad_threshold >= 0.5
+            "#
+        )
+        .execute(&*self.pool)
+        .await
+        .ok(); // Ignore error if no rows exist
 
         sqlx::query(
             r#"

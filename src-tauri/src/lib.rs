@@ -114,7 +114,8 @@ use commands::{
     test_asr_transcription,
     get_service_status, get_latency_data, get_usage_data,
     handle_asr_result,
-    scan_whisper_models, set_active_whisper_model, get_active_whisper_model
+    scan_whisper_models, set_active_whisper_model, get_active_whisper_model,
+    get_streaming_config, save_streaming_config, toggle_streaming_mode
 };
 
 // Import global whisper manager commands

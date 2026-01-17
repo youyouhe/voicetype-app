@@ -14,7 +14,7 @@
     "release": "powershell -ExecutionPolicy Bypass -File build_release.ps1",
     "release:debug": "powershell -ExecutionPolicy Bypass -File build_release.ps1 -Configuration debug",
     "release:nobuild": "powershell -ExecutionPolicy Bypass -File build_release.ps1 -SkipBuild",
-    "release:cuda": "powershell -ExecutionPolicy Bypass -File build_release_cuda.ps1",
+    "release:cuda": "build_package_cuda_11.8.bat",
     "cuda:download": "powershell -ExecutionPolicy Bypass -File scripts/manual_cuda_download.ps1",
     "cuda:copy": "powershell -ExecutionPolicy Bypass -File scripts/copy_local_cuda_dlls.ps1"
   },

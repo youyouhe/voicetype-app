@@ -113,6 +113,7 @@ impl WhisperModel {
 pub struct ModelManager {
     models_dir: PathBuf,
     models: Vec<WhisperModel>,
+    #[allow(dead_code)]
     app_handle: AppHandle,
     preferred_site: Option<String>, // Store last successful site ID
 }

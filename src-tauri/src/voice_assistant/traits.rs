@@ -46,7 +46,7 @@ pub trait AsrProcessor {
     ) -> Result<String, VoiceError>;
 
     /// 启动流式会话 (用于实时边说边转录)
-    fn start_streaming_session(&self, mode: Mode) -> Result<Box<dyn StreamingAsrSession>, VoiceError> {
+    fn start_streaming_session(&self, _mode: Mode) -> Result<Box<dyn StreamingAsrSession>, VoiceError> {
         Err(VoiceError::Other("Streaming not supported by this processor".to_string()))
     }
 

@@ -26,16 +26,17 @@ fn emit_voice_assistant_state_change(state: &InputState) {
     if let Some(handle_guard) = APP_HANDLE.get() {
         if let Ok(app_handle) = handle_guard.lock() {
             if let Some(ref handle) = *app_handle {
+                // 🔥 将Streaming相关状态映射为前端能理解的状态
                 let state_str = match state {
-                    InputState::Idle => "Running".to_string(), // 🔥 FIXED: Keep service as "Running" instead of "Idle"
+                    InputState::Idle => "Running".to_string(), // 语音助手运行中
                     InputState::Recording => "Recording".to_string(),
                     InputState::RecordingTranslate => "RecordingTranslate".to_string(),
                     InputState::Processing => "Processing".to_string(),
                     InputState::Translating => "Translating".to_string(),
-                    // 新增流式状态
-                    InputState::Streaming => "Streaming".to_string(),
-                    InputState::StreamingPaused => "StreamingPaused".to_string(),
-                    InputState::StreamingFinalizing => "StreamingFinalizing".to_string(),
+                    // Streaming状态映射为"Running"（前端不识别Streaming）
+                    InputState::Streaming => "Running".to_string(),  // 🔥 保持"运行中"状态
+                    InputState::StreamingPaused => "Running".to_string(),
+                    InputState::StreamingFinalizing => "Processing".to_string(),  // 🔥 显示"处理中"
                     InputState::Error => "Error".to_string(),
                     InputState::Warning => "Warning".to_string(),
                 };
@@ -272,6 +273,7 @@ impl Default for VoiceAssistantConfig {
 
 pub struct VoiceAssistant {
     config: VoiceAssistantConfig,
+    #[allow(dead_code)]
     app_handle: Option<AppHandle>,
     asr_processor: Option<Arc<dyn AsrProcessor + Send + Sync>>,
     translate_processor: Option<Arc<dyn TranslateProcessor + Send + Sync>>,
@@ -689,9 +691,13 @@ impl VoiceAssistant {
                 self.asr_processor.clone(),
                 self.translate_processor.clone()
             )?;
+            // 🔥 更新streaming配置
+            keyboard_manager.set_streaming_enabled(self.config.streaming_enabled);
+            keyboard_manager.set_streaming_chunk_interval(self.config.streaming_chunk_interval_ms);
             println!("✅ Keyboard manager processors updated");
+            println!("✅ Streaming mode: {}", if self.config.streaming_enabled { "ENABLED" } else { "DISABLED" });
         }
-        
+
         println!("🎉 All configurations successfully refreshed from database");
         Ok(())
     }
@@ -702,7 +708,19 @@ impl VoiceAssistant {
         
         // STEP 0: Skip refresh - config already loaded during initialization
         println!("🔄 Step 0: Configuration already loaded during initialization");
-        
+
+        // 🔥 Step 0.5: Set streaming configuration BEFORE starting keyboard listener
+        println!("📊 Step 0.5: Setting streaming configuration...");
+        if let Ok(keyboard_manager) = self.keyboard_manager.lock() {
+            keyboard_manager.set_streaming_enabled(self.config.streaming_enabled);
+            keyboard_manager.set_streaming_chunk_interval(self.config.streaming_chunk_interval_ms);
+            println!("✅ Streaming configuration set: enabled={}, interval_ms={}",
+                self.config.streaming_enabled,
+                self.config.streaming_chunk_interval_ms);
+        } else {
+            println!("❌ Failed to acquire keyboard manager lock for streaming config");
+        }
+
         // Step 1: Load hotkey configuration from database
         println!("📊 Step 1: Loading hotkey configuration...");
         let db_config = crate::commands::get_hotkey_config_from_database().await?;
@@ -840,13 +858,13 @@ impl VoiceAssistant {
 
     async fn load_config_from_database() -> Result<VoiceAssistantConfig, VoiceError> {
         println!("📊 Loading configuration from database...");
-        
+
         // Get ASR config from database
         let asr_configs = crate::commands::get_asr_config_internal().await?;
         if !asr_configs.is_empty() {
             println!("✅ Found {} ASR config(s) in database", asr_configs.len());
             for (i, config) in asr_configs.iter().enumerate() {
-                println!("  ASR Config {}: service={}, local_endpoint={:?}", 
+                println!("  ASR Config {}: service={}, local_endpoint={:?}",
                     i+1, config.service_provider, config.local_endpoint);
             }
         } else {
@@ -858,12 +876,44 @@ impl VoiceAssistant {
         if !translation_configs.is_empty() {
             println!("✅ Found {} translation config(s) in database", translation_configs.len());
             for (i, config) in translation_configs.iter().enumerate() {
-                println!("  Translation Config {}: provider={}, endpoint={:?}", 
+                println!("  Translation Config {}: provider={}, endpoint={:?}",
                     i+1, config.provider, config.endpoint);
             }
         } else {
             println!("⚠️ No translation configs found in database");
         }
+
+        // 🔥 Get streaming config from database
+        let (streaming_enabled, streaming_chunk_interval_ms, streaming_vad_threshold,
+             streaming_min_speech_duration_ms, streaming_min_silence_duration_ms, streaming_max_segment_length_ms) = {
+            match crate::database::Database::from_global_pool().await {
+                Ok(db) => {
+                    match db.get_streaming_config().await {
+                        Ok(Some(config)) => {
+                            println!("✅ Found streaming config in database:");
+                            println!("  - enabled: {}", config.enabled);
+                            println!("  - chunk_interval_ms: {}", config.chunk_interval_ms);
+                            println!("  - vad_threshold: {}", config.vad_threshold);
+                            (config.enabled, config.chunk_interval_ms as u64, config.vad_threshold,
+                             config.min_speech_duration_ms as u64, config.min_silence_duration_ms as u64,
+                             config.max_segment_length_ms as u64)
+                        }
+                        Ok(None) => {
+                            println!("⚠️ No streaming config found in database, using defaults");
+                            (false, 500, 0.5, 1000, 2000, 30000)
+                        }
+                        Err(e) => {
+                            println!("⚠️ Failed to load streaming config: {}, using defaults", e);
+                            (false, 500, 0.5, 1000, 2000, 30000)
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("⚠️ Failed to get database instance: {}, using defaults", e);
+                    (false, 500, 0.5, 1000, 2000, 30000)
+                }
+            }
+        };
 
         // Determine ASR processor type from database config
         let asr_processor = if let Some(asr_config) = asr_configs.first() {
@@ -899,6 +949,7 @@ impl VoiceAssistant {
         println!("  - ASR processor: {:?}", asr_processor);
         println!("  - Translate processor: {:?}", translate_processor);
         println!("  - Service platform: {}", service_platform);
+        println!("  - Streaming enabled: {}", streaming_enabled);
 
         Ok(VoiceAssistantConfig {
             service_platform,
@@ -916,6 +967,13 @@ impl VoiceAssistant {
                 .unwrap_or_else(|_| "true".to_string())
                 .parse()
                 .unwrap_or(true),
+            // 🔥 使用从数据库读取的streaming配置
+            streaming_enabled,
+            streaming_chunk_interval_ms,
+            streaming_vad_threshold,
+            streaming_min_speech_duration_ms,
+            streaming_min_silence_duration_ms,
+            streaming_max_segment_length_ms,
         })
     }
 

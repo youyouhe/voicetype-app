@@ -5,30 +5,21 @@ use std::path::PathBuf;
 pub fn get_user_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
-        // Windows: %APPDATA%/com.martin.flash-input/
-        if let Ok(appdata) = std::env::var("APPDATA") {
-            PathBuf::from(appdata).join("com.martin.flash-input")
-        } else if let Ok(userprofile) = std::env::var("USERPROFILE") {
-            // Fallback to User Profile
-            PathBuf::from(userprofile)
-                .join("AppData")
-                .join("Roaming")
-                .join("com.martin.flash-input")
+        // Windows: %USERPROFILE%\.voicetype\
+        if let Ok(userprofile) = std::env::var("USERPROFILE") {
+            PathBuf::from(userprofile).join(".voicetype")
         } else {
-            // Last resort
-            PathBuf::from("C:\\Users\\Public\\AppData\\com.martin.flash-input")
+            // Fallback
+            PathBuf::from("C:\\Users\\Public\\.voicetype")
         }
     }
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
-        // macOS/Linux: ~/.local/share/com.martin.flash-input/
+        // macOS/Linux: ~/.voicetype/
         if let Ok(home) = std::env::var("HOME") {
-            PathBuf::from(home)
-                .join(".local")
-                .join("share")
-                .join("com.martin.flash-input")
+            PathBuf::from(home).join(".voicetype")
         } else {
-            PathBuf::from("./data")  // Fallback
+            PathBuf::from("./.voicetype")  // Fallback
         }
     }
 }

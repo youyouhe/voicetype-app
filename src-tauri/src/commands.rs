@@ -1774,22 +1774,27 @@ pub struct StreamingConfigResponse {
 pub async fn get_streaming_config(
     state: State<'_, DatabaseState>,
 ) -> Result<Option<StreamingConfigResponse>, String> {
-    let db_guard = state.lock().unwrap();
-    if let Some(ref db) = *db_guard {
-        match db.get_streaming_config().await {
-            Ok(Some(config)) => Ok(Some(StreamingConfigResponse {
-                enabled: config.enabled,
-                chunk_interval_ms: config.chunk_interval_ms,
-                vad_threshold: config.vad_threshold,
-                min_speech_duration_ms: config.min_speech_duration_ms,
-                min_silence_duration_ms: config.min_silence_duration_ms,
-                max_segment_length_ms: config.max_segment_length_ms,
-            })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(format!("Failed to get streaming config: {}", e)),
+    // Get db reference and release lock before await
+    let db = {
+        let db_guard = state.lock().unwrap();
+        if let Some(ref db) = *db_guard {
+            db.clone()
+        } else {
+            return Err("Database not initialized".to_string());
         }
-    } else {
-        Err("Database not initialized".to_string())
+    };
+
+    match db.get_streaming_config().await {
+        Ok(Some(config)) => Ok(Some(StreamingConfigResponse {
+            enabled: config.enabled,
+            chunk_interval_ms: config.chunk_interval_ms,
+            vad_threshold: config.vad_threshold,
+            min_speech_duration_ms: config.min_speech_duration_ms,
+            min_silence_duration_ms: config.min_silence_duration_ms,
+            max_segment_length_ms: config.max_segment_length_ms,
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("Failed to get streaming config: {}", e)),
     }
 }
 
@@ -1798,31 +1803,36 @@ pub async fn save_streaming_config(
     state: State<'_, DatabaseState>,
     request: StreamingConfigRequest,
 ) -> Result<StreamingConfigResponse, String> {
-    let db_guard = state.lock().unwrap();
-    if let Some(ref db) = *db_guard {
-        match db.save_streaming_config(
-            request.enabled,
-            request.chunk_interval_ms,
-            request.vad_threshold,
-            request.min_speech_duration_ms,
-            request.min_silence_duration_ms,
-            request.max_segment_length_ms,
-        ).await {
-            Ok(config) => {
-                println!("✅ Streaming config saved: enabled={}, vad_threshold={}", config.enabled, config.vad_threshold);
-                Ok(StreamingConfigResponse {
-                    enabled: config.enabled,
-                    chunk_interval_ms: config.chunk_interval_ms,
-                    vad_threshold: config.vad_threshold,
-                    min_speech_duration_ms: config.min_speech_duration_ms,
-                    min_silence_duration_ms: config.min_silence_duration_ms,
-                    max_segment_length_ms: config.max_segment_length_ms,
-                })
-            }
-            Err(e) => Err(format!("Failed to save streaming config: {}", e)),
+    // Get db reference and release lock before await
+    let db = {
+        let db_guard = state.lock().unwrap();
+        if let Some(ref db) = *db_guard {
+            db.clone()
+        } else {
+            return Err("Database not initialized".to_string());
         }
-    } else {
-        Err("Database not initialized".to_string())
+    };
+
+    match db.save_streaming_config(
+        request.enabled,
+        request.chunk_interval_ms,
+        request.vad_threshold,
+        request.min_speech_duration_ms,
+        request.min_silence_duration_ms,
+        request.max_segment_length_ms,
+    ).await {
+        Ok(config) => {
+            println!("✅ Streaming config saved: enabled={}, vad_threshold={}", config.enabled, config.vad_threshold);
+            Ok(StreamingConfigResponse {
+                enabled: config.enabled,
+                chunk_interval_ms: config.chunk_interval_ms,
+                vad_threshold: config.vad_threshold,
+                min_speech_duration_ms: config.min_speech_duration_ms,
+                min_silence_duration_ms: config.min_silence_duration_ms,
+                max_segment_length_ms: config.max_segment_length_ms,
+            })
+        }
+        Err(e) => Err(format!("Failed to save streaming config: {}", e)),
     }
 }
 
@@ -1833,28 +1843,34 @@ pub async fn toggle_streaming_mode(
 ) -> Result<bool, String> {
     println!("🔄 Toggling streaming mode: {}", enabled);
 
-    // First get current config
-    let db_guard = state.lock().unwrap();
-    if let Some(ref db) = *db_guard {
-        // Get existing config or use defaults
-        let current_config = db.get_streaming_config().await?.unwrap_or_default();
-
-        // Save updated config
-        match db.save_streaming_config(
-            enabled,
-            current_config.chunk_interval_ms,
-            current_config.vad_threshold,
-            current_config.min_speech_duration_ms,
-            current_config.min_silence_duration_ms,
-            current_config.max_segment_length_ms,
-        ).await {
-            Ok(_) => {
-                println!("✅ Streaming mode toggled to: {}", enabled);
-                Ok(enabled)
-            }
-            Err(e) => Err(format!("Failed to toggle streaming mode: {}", e)),
+    // Get db reference and release lock before await
+    let db = {
+        let db_guard = state.lock().unwrap();
+        if let Some(ref db) = *db_guard {
+            db.clone()
+        } else {
+            return Err("Database not initialized".to_string());
         }
-    } else {
-        Err("Database not initialized".to_string())
+    };
+
+    // Get existing config or use defaults
+    let current_config = db.get_streaming_config().await
+        .map_err(|e| format!("Database error: {}", e))?
+        .unwrap_or_default();
+
+    // Save updated config
+    match db.save_streaming_config(
+        enabled,
+        current_config.chunk_interval_ms,
+        current_config.vad_threshold,
+        current_config.min_speech_duration_ms,
+        current_config.min_silence_duration_ms,
+        current_config.max_segment_length_ms,
+    ).await {
+        Ok(_) => {
+            println!("✅ Streaming mode toggled to: {}", enabled);
+            Ok(enabled)
+        }
+        Err(e) => Err(format!("Failed to toggle streaming mode: {}", e)),
     }
 }

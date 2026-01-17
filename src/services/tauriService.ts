@@ -45,6 +45,16 @@ export interface TranslateType {
   Ollama: 'ollama';
 }
 
+// Streaming Configuration Types
+export interface StreamingConfig {
+  enabled: boolean;
+  chunk_interval_ms: number;
+  vad_threshold: number;
+  min_speech_duration_ms: number;
+  min_silence_duration_ms: number;
+  max_segment_length_ms: number;
+}
+
 // Voice Assistant Service
 export class TauriService {
   // Voice Assistant Control
@@ -146,31 +156,6 @@ export class TauriService {
   static async checkNvidiaDriver(): Promise<NvidiaDriverInfo> {
     return await invoke<NvidiaDriverInfo>('check_nvidia_driver');
   }
-}
-
-export interface NvidiaDriverInfo {
-  installed: boolean;
-  driver_version: string | null;
-  cuda_version: string | null;
-  minimum_required: string;
-  is_compatible: boolean;
-  gpu_name: string | null;
-  error_message: string | null;
-}
-
-// Streaming Configuration Types
-export interface StreamingConfig {
-  enabled: boolean;
-  chunk_interval_ms: number;
-  vad_threshold: number;
-  min_speech_duration_ms: number;
-  min_silence_duration_ms: number;
-  max_segment_length_ms: number;
-}
-
-// Extend TauriService with streaming methods
-export class TauriService {
-  // ... existing methods ...
 
   // Streaming configuration methods
   static async getStreamingConfig(): Promise<StreamingConfig | null> {
@@ -184,4 +169,14 @@ export class TauriService {
   static async toggleStreamingMode(enabled: boolean): Promise<boolean> {
     return await invoke<boolean>('toggle_streaming_mode', { enabled });
   }
+}
+
+export interface NvidiaDriverInfo {
+  installed: boolean;
+  driver_version: string | null;
+  cuda_version: string | null;
+  minimum_required: string;
+  is_compatible: boolean;
+  gpu_name: string | null;
+  error_message: string | null;
 }

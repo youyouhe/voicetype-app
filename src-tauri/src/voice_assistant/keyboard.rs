@@ -2,6 +2,7 @@ use rdev::{listen, EventType, Key};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use std::process::Command;
+use std::thread::{self, JoinHandle};
 use crate::voice_assistant::{KeyboardManagerTrait, AsrProcessor, TranslateProcessor, InputState, VoiceError};
 use crate::voice_assistant::hotkey_parser::ParsedHotkey;
 use std::collections::HashSet;
@@ -27,7 +28,10 @@ pub struct KeyboardManager {
     streaming_session: Arc<Mutex<Option<Box<dyn crate::voice_assistant::StreamingAsrSession>>>>,
     streaming_enabled: Arc<Mutex<bool>>,
     streaming_chunk_interval_ms: Arc<Mutex<u64>>,
+    #[allow(dead_code)]
     streaming_last_process_time: Arc<Mutex<Option<Instant>>>,
+    streaming_thread_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
+    streaming_stop_signal: Arc<Mutex<bool>>,
 }
 
 impl KeyboardManager {
@@ -52,6 +56,8 @@ impl KeyboardManager {
             streaming_enabled: Arc::new(Mutex::new(false)),
             streaming_chunk_interval_ms: Arc::new(Mutex::new(500)),
             streaming_last_process_time: Arc::new(Mutex::new(None)),
+            streaming_thread_handle: Arc::new(Mutex::new(None)),
+            streaming_stop_signal: Arc::new(Mutex::new(false)),
         })
     }
 
@@ -115,6 +121,13 @@ impl KeyboardManager {
         let temp_text_length = self.temp_text_length.clone();
         let original_clipboard = self.original_clipboard.clone();
 
+        // 克隆流式相关字段
+        let streaming_session = self.streaming_session.clone();
+        let streaming_enabled = self.streaming_enabled.clone();
+        let streaming_chunk_interval_ms = self.streaming_chunk_interval_ms.clone();
+        let streaming_stop_signal = self.streaming_stop_signal.clone();
+        let streaming_thread_handle = self.streaming_thread_handle.clone();
+
         // Use tokio::task::spawn_blocking to avoid runtime conflicts with rdev
         // 获取save_wav_files配置传递到回调中
         let save_wav_files_config = *self.save_wav_files.lock().unwrap();
@@ -124,7 +137,9 @@ impl KeyboardManager {
         let typing_delays_for_callback = self.typing_delays.clone();
 
         tokio::task::spawn_blocking(move || {
-            let mut recorder: Option<crate::voice_assistant::AudioRecorder> = None;
+            // 将 recorder 包装成 Arc<Mutex<>> 以便流式线程访问
+            let recorder = Arc::new(Mutex::new(None::<crate::voice_assistant::AudioRecorder>));
+            let recorder_for_stream = recorder.clone();
 
             // 使用传递过来的save_wav_files配置
             let save_wav_files = save_wav_files_config;
@@ -133,6 +148,9 @@ impl KeyboardManager {
             let mut recording_started = false;
             let mut hotkey_press_time: Option<Instant> = None;
             const HOTKEY_DELAY_THRESHOLD: Duration = Duration::from_millis(300); // 防误触阈值
+
+            // 定义流式模式使用的 mode
+            let mode = crate::voice_assistant::Mode::Transcriptions;
 
             if let Err(e) = listen(move |event| {
                 match event.event_type {
@@ -178,15 +196,30 @@ impl KeyboardManager {
                                 };
 
                                 if should_trigger {
-                                    println!("🎤 Transcribe hotkey pressed - starting recording state...");
+                                    // 🔥 根据streaming_enabled决定使用哪种模式
+                                    let is_streaming_enabled = *streaming_enabled.lock().unwrap();
+
+                                    if is_streaming_enabled {
+                                        println!("🎯 Transcribe hotkey pressed - starting STREAMING state...");
+                                    } else {
+                                        println!("🎤 Transcribe hotkey pressed - starting RECORDING state...");
+                                    }
 
                                     // IMPORTANT: Clear keys immediately to prevent repeated triggers
                                     keys.clear();
 
                                     *hotkey_start_time.lock().unwrap() = Some(Instant::now());
-                                    *state.lock().unwrap() = InputState::Recording; // Start recording state
+
+                                    // 🔥 根据streaming配置设置状态
+                                    let new_state = if is_streaming_enabled {
+                                        InputState::Streaming
+                                    } else {
+                                        InputState::Recording
+                                    };
+                                    *state.lock().unwrap() = new_state.clone();
+
                                     // Emit state change event
-                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Recording);
+                                    crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&new_state);
                                     recording_started = true;
                                     hotkey_press_time = None; // 重置按键时间
                                 }
@@ -271,6 +304,7 @@ impl KeyboardManager {
                                     // Emit state change event
                                     crate::voice_assistant::coordinator::emit_voice_assistant_state_from_keyboard(&InputState::Translating);
                                 }
+                                // 🔥 Streaming模式：松开F4后继续streaming，处理结果
                                 InputState::Streaming => {
                                     println!("🎯 Streaming hotkey released - finalizing streaming...");
                                     *state.lock().unwrap() = InputState::StreamingFinalizing;
@@ -296,12 +330,12 @@ impl KeyboardManager {
                         InputState::Recording => {
                             // 开始转录录音
                             println!("🎤 Recording state - starting real audio recording...");
-                            Self::start_recording_internal(&mut recorder, save_wav_files);
+                            Self::start_recording_internal(&recorder, save_wav_files);
                         }
                         InputState::RecordingTranslate => {
                             // 开始翻译录音
                             println!("🌐 Recording Translate state - starting real audio recording...");
-                            Self::start_recording_internal(&mut recorder, save_wav_files);
+                            Self::start_recording_internal(&recorder, save_wav_files);
                         }
                         InputState::Processing => {
                             // Process recorded audio with real ASR
@@ -310,54 +344,55 @@ impl KeyboardManager {
 
                             // Stop recording and get audio data
                             // Process ASR - can now be done synchronously since we use spawn_blocking internally
-                            let asr_result = if let Some(ref mut rec) = recorder {
-                                println!("🛑 Stopping recording...");
+                            let asr_result = {
+                                let (audio_data, sample_rate, has_recorder) = if let Some(rec) = recorder.lock().unwrap().as_ref() {
+                                    println!("🛑 Stopping recording...");
 
-                                // Get audio data BEFORE stopping recording (to avoid data loss)
-                                let audio_data = rec.get_audio_data();
-                                println!("📊 Got audio data: {} samples", audio_data.len());
+                                    // Get audio data BEFORE stopping recording (to avoid data loss)
+                                    let audio_data = rec.get_audio_data();
+                                    let sample_rate = rec.get_sample_rate();
+                                    println!("📊 Got audio data: {} samples", audio_data.len());
 
-                                match rec.stop_recording_with_option(save_wav_files) {
-                                    Ok(_) => {
-                                        println!("✅ Recording stopped successfully");
+                                    (audio_data, sample_rate, true)
+                                } else {
+                                    println!("❌ No recorder available");
+                                    (Vec::new(), 0, false)
+                                };
 
-                                        if audio_data.is_empty() {
-                                            println!("⚠️ No audio data recorded, using mock text");
-                                            Some("No audio recorded - please check microphone".to_string())
-                                        } else {
-                                            // Convert to WAV format for ASR processing
-                                            match Self::convert_to_wav_bytes(&audio_data, rec.get_sample_rate()) {
-                                                Ok(wav_bytes) => {
-                                                    println!("🔄 Converting {} audio samples to WAV format ({} bytes)", audio_data.len(), wav_bytes.len());
+                                if has_recorder && !audio_data.is_empty() {
+                                    // Stop recording
+                                    if let Some(ref mut rec) = *recorder.lock().unwrap() {
+                                        let _ = rec.stop_recording_with_option(save_wav_files);
+                                    }
 
-                                                    // Process with ASR - this now uses spawn_blocking internally
-                                                    use std::io::Cursor;
-                                                    match _asr_processor.process_audio(Cursor::new(wav_bytes), crate::voice_assistant::Mode::Transcriptions, "") {
-                                                        Ok(result) => {
-                                                            println!("✅ ASR processing successful");
-                                                            Some(result)
-                                                        }
-                                                        Err(e) => {
-                                                            println!("❌ ASR processing failed: {}", e);
-                                                            Some(format!("ASR Error: {}", e))
-                                                        }
-                                                    }
+                                    // Convert to WAV format for ASR processing
+                                    match Self::convert_to_wav_bytes(&audio_data, sample_rate) {
+                                        Ok(wav_bytes) => {
+                                            println!("🔄 Converting {} audio samples to WAV format ({} bytes)", audio_data.len(), wav_bytes.len());
+
+                                            // Process with ASR - this now uses spawn_blocking internally
+                                            use std::io::Cursor;
+                                            match _asr_processor.process_audio(Cursor::new(wav_bytes), crate::voice_assistant::Mode::Transcriptions, "") {
+                                                Ok(result) => {
+                                                    println!("✅ ASR processing successful");
+                                                    Some(result)
                                                 }
                                                 Err(e) => {
-                                                    println!("❌ Failed to convert audio to WAV: {}", e);
-                                                    Some(format!("Audio conversion error: {}", e))
+                                                    println!("❌ ASR processing failed: {}", e);
+                                                    Some(format!("ASR Error: {}", e))
                                                 }
                                             }
                                         }
+                                        Err(e) => {
+                                            println!("❌ Failed to convert audio to WAV: {}", e);
+                                            Some(format!("Audio conversion error: {}", e))
+                                        }
                                     }
-                                    Err(e) => {
-                                        println!("❌ Failed to stop recording: {}", e);
-                                        Some(format!("Recording error: {}", e))
-                                    }
+                                } else if has_recorder && audio_data.is_empty() {
+                                    Some("No audio recorded - please check microphone".to_string())
+                                } else {
+                                    Some("No recorder available".to_string())
                                 }
-                            } else {
-                                println!("❌ No recorder available");
-                                Some("No recorder available".to_string())
                             };
 
                             // Use the ASR result
@@ -393,7 +428,7 @@ impl KeyboardManager {
                             }
 
                             // Reset recorder for next use
-                            recorder = None;
+                            *recorder.lock().unwrap() = None;
 
                             // IMPORTANT: Reset state and flags after processing
                             println!("🔄 Resetting state after processing completion...");
@@ -408,57 +443,64 @@ impl KeyboardManager {
                             println!("🔄 Entering Translating state...");
                             println!("🌐 Using whisper.cpp built-in translation (speech → English text)...");
 
-                            let final_result = if let Some(ref mut rec) = recorder {
+                            // Get audio data and sample rate BEFORE stopping recording
+                            let (audio_data, sample_rate, has_recorder) = if let Some(rec) = recorder.lock().unwrap().as_ref() {
                                 println!("🛑 Stopping recording for translation...");
 
-                                // Get audio data and sample rate BEFORE stopping recording
                                 let audio_data = rec.get_audio_data();
                                 let sample_rate = rec.get_sample_rate();
                                 println!("📊 Got audio data: {} samples", audio_data.len());
 
-                                // Stop recording
-                                let _ = rec.stop_recording();
+                                (audio_data, sample_rate, true)
+                            } else {
+                                (Vec::new(), 0, false)
+                            };
 
-                                // Convert to WAV bytes (after we're done with rec)
-                                let wav_bytes_result = Self::convert_to_wav_bytes(&audio_data, sample_rate);
-                                let _ = rec; // Explicitly drop the borrow
-                                recorder = None; // Now we can assign
+                            // Stop recording
+                            if has_recorder {
+                                if let Some(ref mut rec) = *recorder.lock().unwrap() {
+                                    let _ = rec.stop_recording();
+                                }
+                            }
 
-                                match wav_bytes_result {
-                                    Ok(wav_bytes) => {
-                                        let audio_cursor = std::io::Cursor::new(wav_bytes);
-                                        println!("🎵 Converted audio to WAV format");
+                            // Convert to WAV bytes
+                            let wav_bytes_result = Self::convert_to_wav_bytes(&audio_data, sample_rate);
 
-                                        // 🔥 关键：使用 Mode::Translations 让whisper直接翻译成英文
-                                        let start = std::time::Instant::now();
-                                        let translation = _asr_processor.process_audio(
-                                            audio_cursor,
-                                            crate::voice_assistant::Mode::Translations,  // 🔥 翻译模式
-                                            ""
-                                        );
-                                        let processing_time = start.elapsed().as_millis() as i64;
+                            let final_result = match wav_bytes_result {
+                                Ok(wav_bytes) => {
+                                    let audio_cursor = std::io::Cursor::new(wav_bytes);
+                                    println!("🎵 Converted audio to WAV format");
 
-                                        match translation {
-                                            Ok(translated_text) => {
-                                                println!("✅ Whisper translation result: \"{}\"", translated_text);
-                                                println!("⏱️ Processing time: {}ms", processing_time);
-                                                Some(translated_text)
-                                            }
-                                            Err(e) => {
-                                                println!("❌ Whisper translation error: {}", e);
-                                                Some(format!("❌ Translation failed: {}", e))
-                                            }
+                                    // 🔥 关键：使用 Mode::Translations 让whisper直接翻译成英文
+                                    let start = std::time::Instant::now();
+                                    let translation = _asr_processor.process_audio(
+                                        audio_cursor,
+                                        crate::voice_assistant::Mode::Translations,  // 🔥 翻译模式
+                                        ""
+                                    );
+                                    let processing_time = start.elapsed().as_millis() as i64;
+
+                                    match translation {
+                                        Ok(translated_text) => {
+                                            println!("✅ Whisper translation result: \"{}\"", translated_text);
+                                            println!("⏱️ Processing time: {}ms", processing_time);
+                                            Some(translated_text)
+                                        }
+                                        Err(e) => {
+                                            println!("❌ Whisper translation error: {}", e);
+                                            Some(format!("❌ Translation failed: {}", e))
                                         }
                                     }
-                                    Err(e) => {
-                                        println!("❌ Failed to convert audio to WAV: {}", e);
-                                        Some(format!("❌ Audio conversion failed: {}", e))
-                                    }
                                 }
-                            } else {
-                                println!("⚠️ No recorder found, nothing to translate");
-                                Some("❌ No recording found".to_string())
+                                Err(e) => {
+                                    println!("❌ Failed to convert audio to WAV: {}", e);
+                                    Some(format!("❌ Audio conversion failed: {}", e))
+                                }
                             };
+
+                            if !has_recorder {
+                                println!("⚠️ No recorder found, nothing to translate");
+                            }
 
                             // Type the result
                             if let Some(result_text) = final_result {
@@ -473,6 +515,7 @@ impl KeyboardManager {
 
                             // IMPORTANT: Reset state and flags immediately after processing
                             println!("🔄 Resetting state after translation completion...");
+                            *recorder.lock().unwrap() = None;
                             recording_started = false;
                             *hotkey_start_time.lock().unwrap() = None;
                             *state.lock().unwrap() = InputState::Idle;
@@ -482,44 +525,65 @@ impl KeyboardManager {
                         // ========== Streaming states ==========
                         InputState::Streaming => {
                             println!("🎯 Streaming state - starting streaming session...");
-                            Self::start_recording_internal(&mut recorder, save_wav_files);
-                            // TODO: 启动流式会话
-                            // Self::start_streaming_session_internal(mode);
-                        }
-                        InputState::StreamingFinalizing => {
-                            println!("🎯 StreamingFinalizing state - processing remaining audio...");
-                            // TODO: 结束流式会话
-                            // Self::finalize_streaming_session();
 
-                            // 临时实现：使用批处理模式
-                            if let Some(ref mut rec) = recorder {
-                                println!("🛑 Stopping streaming recording...");
-                                let audio_data = rec.get_audio_data();
-                                match rec.stop_recording_with_option(save_wav_files) {
-                                    Ok(_) => {
-                                        match Self::convert_to_wav_bytes(&audio_data, rec.get_sample_rate()) {
-                                            Ok(wav_bytes) => {
-                                                use std::io::Cursor;
-                                                match _asr_processor.process_audio(Cursor::new(wav_bytes), crate::voice_assistant::Mode::Transcriptions, "") {
-                                                    Ok(result) => {
-                                                        println!("✅ Streaming final result: \"{}\"", result);
-                                                        Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result, None, &typing_delays_for_callback.lock().unwrap());
-                                                    }
-                                                    Err(e) => {
-                                                        println!("❌ Streaming final ASR failed: {}", e);
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                println!("❌ Streaming audio conversion failed: {}", e);
-                                            }
-                                        }
-                                    }
-                                    Err(e) => {
-                                        println!("❌ Failed to stop streaming recording: {}", e);
-                                    }
+                            // 启动录音
+                            Self::start_recording_internal(&recorder, save_wav_files);
+
+                            // 启动流式会话
+                            match Self::start_streaming_session_internal(mode, &_asr_processor) {
+                                Ok(session) => {
+                                    *streaming_session.lock().unwrap() = Some(session);
+                                    // 启动流式处理线程
+                                    Self::start_streaming_processor_thread(
+                                        &recorder_for_stream,
+                                        &_asr_processor,
+                                        &streaming_session,
+                                        &streaming_enabled,
+                                        &streaming_chunk_interval_ms,
+                                        &streaming_stop_signal,
+                                        &streaming_thread_handle,
+                                    );
+                                }
+                                Err(e) => {
+                                    println!("❌ Failed to start streaming session: {}", e);
+                                    *state.lock().unwrap() = InputState::Idle;
+                                    recording_started = false;
+                                    *hotkey_start_time.lock().unwrap() = None;
                                 }
                             }
+                        }
+                        InputState::StreamingFinalizing => {
+                            println!("🎯 StreamingFinalizing state - stopping streaming session...");
+
+                            // 停止流式处理线程
+                            *streaming_stop_signal.lock().unwrap() = true;
+
+                            // 等待线程结束（带超时）
+                            if let Some(handle) = streaming_thread_handle.lock().unwrap().take() {
+                                let _ = handle.join();
+                            }
+                            *streaming_stop_signal.lock().unwrap() = false;
+
+                            // 结束流式会话，获取最终结果
+                            match Self::finalize_streaming_session_internal(&streaming_session) {
+                                Ok(final_text) => {
+                                    if !final_text.is_empty() {
+                                        println!("✅ Streaming final result: \"{}\"", final_text);
+                                        Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &final_text, None, &typing_delays_for_callback.lock().unwrap());
+                                    }
+                                }
+                                Err(e) => {
+                                    println!("❌ Failed to finalize streaming session: {}", e);
+                                }
+                            }
+
+                            // 停止录音（但保留 recorder 实例以便下次复用）
+                            if let Some(ref mut rec) = *recorder.lock().unwrap() {
+                                let _ = rec.stop_recording_with_option(save_wav_files);
+                            }
+
+                            // 🔥 优化：不清空 recorder，保留 AudioRecorder 实例以便下次复用
+                            // 这样可以避免重新初始化麦克风
 
                             // Reset state
                             recording_started = false;
@@ -560,18 +624,29 @@ impl KeyboardManager {
     Ok(cursor.into_inner())
 }
 
-fn start_recording_internal(recorder: &mut Option<crate::voice_assistant::AudioRecorder>, save_wav_files: bool) {
-        if recorder.is_none() {
+fn start_recording_internal(recorder: &Arc<Mutex<Option<crate::voice_assistant::AudioRecorder>>>, save_wav_files: bool) {
+        let mut recorder_guard = recorder.lock().unwrap();
+
+        if let Some(ref mut rec) = *recorder_guard {
+            // 🔥 优化：复用已存在的 AudioRecorder
+            println!("♻️ Reusing existing AudioRecorder");
+            rec.set_save_wav_files(save_wav_files);
+            if let Err(e) = rec.start_recording() {
+                eprintln!("Failed to start recording: {}", e);
+            } else {
+                println!("🎙️ Recording restarted (Save WAV: {})", save_wav_files);
+            }
+        } else {
+            // 创建新的 AudioRecorder（首次使用）
             match crate::voice_assistant::AudioRecorder::new() {
                 Ok(mut r) => {
-                    // Set the save_wav_files option on the recorder
                     r.set_save_wav_files(save_wav_files);
 
                     if let Err(e) = r.start_recording() {
                         eprintln!("Failed to start recording: {}", e);
                     } else {
                         println!("🎙️ Recording started (Save WAV: {})", save_wav_files);
-                        *recorder = Some(r);
+                        *recorder_guard = Some(r);
                     }
                 }
                 Err(e) => eprintln!("Failed to create recorder: {}", e),
@@ -1498,8 +1573,143 @@ fn set_clipboard_content(text: &str) {
             println!("📋 Text to copy manually: {}", text);
         }
     }
+}
 
+impl KeyboardManager {
     // ========== Streaming support methods ==========
+
+    /// 启动流式会话（静态版本，用于回调）
+    fn start_streaming_session_internal(
+        mode: crate::voice_assistant::Mode,
+        asr_processor: &Arc<dyn AsrProcessor + Send + Sync>,
+    ) -> Result<Box<dyn crate::voice_assistant::StreamingAsrSession>, VoiceError> {
+        match asr_processor.start_streaming_session(mode) {
+            Ok(session) => {
+                println!("✅ Streaming session started");
+                Ok(session)
+            }
+            Err(e) => {
+                eprintln!("❌ Failed to start streaming session: {}", e);
+                Err(e)
+            }
+        }
+    }
+
+    /// 结束流式会话（静态版本，用于回调）
+    fn finalize_streaming_session_internal(
+        streaming_session: &Arc<Mutex<Option<Box<dyn crate::voice_assistant::StreamingAsrSession>>>>,
+    ) -> Result<String, VoiceError> {
+        if let Some(mut session) = streaming_session.lock().unwrap().take() {
+            let final_text = session.finalize()?;
+            println!("✅ Streaming session finalized: \"{}\"", final_text);
+            Ok(final_text)
+        } else {
+            Ok(String::new())
+        }
+    }
+
+    /// 启动流式处理线程
+    fn start_streaming_processor_thread(
+        recorder: &Arc<Mutex<Option<crate::voice_assistant::AudioRecorder>>>,
+        _asr_processor: &Arc<dyn AsrProcessor + Send + Sync>,
+        streaming_session: &Arc<Mutex<Option<Box<dyn crate::voice_assistant::StreamingAsrSession>>>>,
+        streaming_enabled: &Arc<Mutex<bool>>,
+        streaming_chunk_interval_ms: &Arc<Mutex<u64>>,
+        streaming_stop_signal: &Arc<Mutex<bool>>,
+        streaming_thread_handle: &Arc<Mutex<Option<JoinHandle<()>>>>,
+    ) {
+        // 检查是否已启用流式模式
+        if !*streaming_enabled.lock().unwrap() {
+            println!("⚠️ Streaming mode is disabled, skipping streaming processor");
+            return;
+        }
+
+        let recorder_clone = recorder.clone();
+        let streaming_session_clone = streaming_session.clone();
+        let streaming_enabled_clone = streaming_enabled.clone();
+        let streaming_stop_signal_clone = streaming_stop_signal.clone();
+        let streaming_chunk_interval_ms_clone = streaming_chunk_interval_ms.clone();
+
+        // 启动流式处理线程
+        let handle = thread::spawn(move || {
+            println!("🔄 Streaming processor thread started");
+
+            // 🔥 优化：跟踪上次处理到的位置，只获取新音频
+            let mut last_processed_length = 0usize;
+
+            loop {
+                // 检查停止信号
+                if *streaming_stop_signal_clone.lock().unwrap() {
+                    println!("🛑 Streaming processor thread received stop signal");
+                    break;
+                }
+
+                // 检查流式模式是否仍然启用
+                if !*streaming_enabled_clone.lock().unwrap() {
+                    break;
+                }
+
+                // 检查是否有流式会话
+                let has_session = streaming_session_clone.lock().unwrap().is_some();
+                if !has_session {
+                    break;
+                }
+
+                // 等待处理间隔
+                let interval_ms = *streaming_chunk_interval_ms_clone.lock().unwrap();
+                thread::sleep(Duration::from_millis(interval_ms));
+
+                // 获取录音数据并处理
+                if let Some(ref rec) = *recorder_clone.lock().unwrap() {
+                    let all_audio_samples = rec.get_audio_data();
+                    let sample_rate = rec.get_sample_rate();
+
+                    if all_audio_samples.is_empty() {
+                        continue;
+                    }
+
+                    // 🔥 优化：只获取新增加的音频样本
+                    let current_length = all_audio_samples.len();
+                    if current_length <= last_processed_length {
+                        // 没有新音频，跳过
+                        continue;
+                    }
+
+                    let new_audio_samples = &all_audio_samples[last_processed_length..];
+                    let new_sample_count = new_audio_samples.len();
+
+                    println!("🎵 Streaming: Got {} new audio samples ({}Hz), total: {}",
+                        new_sample_count, sample_rate, current_length);
+
+                    // 更新已处理位置
+                    last_processed_length = current_length;
+
+                    // 处理音频块
+                    if let Some(session) = streaming_session_clone.lock().unwrap().as_mut() {
+                        match session.process_audio_chunk(new_audio_samples, sample_rate) {
+                            Ok(segments) => {
+                                println!("🎯 Streaming: Got {} segments", segments.len());
+                                for segment in segments {
+                                    if segment.is_final && segment.should_type {
+                                        println!("🎯 Streaming result: \"{}\"", segment.text);
+                                        // 🔥 实时输入流式结果到目标窗口
+                                        type_text_incremental(&segment.text);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("❌ Streaming processing error: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            println!("✅ Streaming processor thread stopped");
+        });
+
+        *streaming_thread_handle.lock().unwrap() = Some(handle);
+    }
 
     /// 设置是否启用流式模式
     pub fn set_streaming_enabled(&self, enabled: bool) {
@@ -1511,61 +1721,10 @@ fn set_clipboard_content(text: &str) {
     pub fn set_streaming_chunk_interval(&self, interval_ms: u64) {
         *self.streaming_chunk_interval_ms.lock().unwrap() = interval_ms;
     }
+}
 
-    /// 启动流式会话
-    pub fn start_streaming_session_internal(&self, mode: crate::voice_assistant::Mode) -> Result<(), VoiceError> {
-        match self.asr_processor.start_streaming_session(mode) {
-            Ok(session) => {
-                *self.streaming_session.lock().unwrap() = Some(session);
-                println!("✅ Streaming session started");
-                Ok(())
-            }
-            Err(e) => {
-                eprintln!("❌ Failed to start streaming session: {}", e);
-                Err(e)
-            }
-        }
-    }
-
-    /// 结束流式会话
-    pub fn finalize_streaming_session(&self) -> Result<String, VoiceError> {
-        if let Some(session) = self.streaming_session.lock().unwrap().take() {
-            let final_text = session.finalize()?;
-            println!("✅ Streaming session finalized: \"{}\"", final_text);
-            Ok(final_text)
-        } else {
-            Ok(String::new())
-        }
-    }
-
-    /// 处理流式音频（在录音期间定期调用）
-    pub fn process_streaming_audio_internal(&self, audio_samples: &[f32], sample_rate: u32) {
-        // 检查是否应该处理（基于时间间隔）
-        let interval_ms = *self.streaming_chunk_interval_ms.lock().unwrap();
-        let now = Instant::now();
-        let should_process = if let Some(last_time) = *self.streaming_last_process_time.lock().unwrap() {
-            now.duration_since(last_time).as_millis() >= interval_ms as u128
-        } else {
-            true
-        };
-
-        if !should_process {
-            return;
-        }
-
-        *self.streaming_last_process_time.lock().unwrap() = Some(now);
-
-        // 处理音频
-        if let Some(ref session) = *self.streaming_session.lock().unwrap() {
-            // 注意：这里需要可变引用，但由于是在 Arc<Mutex> 中，需要特殊处理
-            // 简化实现：暂时使用借用检查器友好的方式
-            println!("🎯 Processing streaming audio chunk: {} samples", audio_samples.len());
-            // TODO: 实际实现需要重新设计流式会话的访问模式
-        }
-    }
-
-    /// 增量打字（追加，不删除现有内容）
-    pub fn type_text_incremental(text: &str) {
+/// 增量打字（追加，不删除现有内容）
+pub fn type_text_incremental(text: &str) {
         println!("🎯 Streaming text: \"{}\"", text);
 
         #[cfg(target_os = "linux")]
@@ -1607,9 +1766,12 @@ fn set_clipboard_content(text: &str) {
 
         #[cfg(target_os = "windows")]
         {
-            // Windows: 使用 SendInput
-            // TODO: 实现 Windows 平台的增量打字
-            println!("⚠️ Windows streaming typing not yet implemented");
+            // 🔥 Windows: 使用逐字符Unicode输入（与正常转录相同的方式）
+            println!("⌨️ Windows streaming typing using Unicode input...");
+            for ch in text.chars() {
+                type_unicode_char(ch);
+            }
+            println!("✅ Streaming text typed successfully");
         }
 
         #[cfg(target_os = "macos")]
@@ -1618,7 +1780,6 @@ fn set_clipboard_content(text: &str) {
             // TODO: 实现 macOS 平台的增量打字
             println!("⚠️ macOS streaming typing not yet implemented");
         }
-    }
 }
 
 /// 占位符 ASR 处理器，用于释放实际处理器时使用

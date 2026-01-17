@@ -15,6 +15,7 @@ pub struct AudioRecorder {
     save_wav_files: bool,
     _host: Host,
     recording_audio_data: Option<std::sync::Arc<std::sync::Mutex<Vec<f32>>>>,
+    stream_initialized: bool,  // 🔥 新增：跟踪stream是否已初始化
 }
 
 impl AudioRecorder {
@@ -40,6 +41,7 @@ impl AudioRecorder {
             save_wav_files: true, // Default to true
             _host: host,
             recording_audio_data: None,
+            stream_initialized: false,  // 🔥 初始化为false
         })
     }
 
@@ -47,6 +49,26 @@ impl AudioRecorder {
         if self.recording {
             return Ok(());
         }
+
+        // 🔥 如果stream已经初始化，直接开始录音，不重新创建stream
+        if self.stream_initialized {
+            println!("🎙️ Resuming recording (stream already active)");
+            self.recording = true;
+            self.record_start_time = Some(std::time::Instant::now());
+
+            // 清空之前的音频数据
+            if let Some(ref audio_data_arc) = self.recording_audio_data {
+                if let Ok(mut buffer) = audio_data_arc.lock() {
+                    buffer.clear();
+                }
+            }
+
+            println!("Recording started");
+            return Ok(());
+        }
+
+        // 首次启动，需要创建stream
+        println!("🎙️ First time - initializing audio stream...");
 
         let host = cpal::default_host();
         let device = host.default_input_device()
@@ -165,10 +187,11 @@ impl AudioRecorder {
         stream.play().map_err(|e| VoiceError::Audio(format!("Failed to play stream: {}", e)))?;
 
         self.stream = Some(stream);
+        self.stream_initialized = true;  // 🔥 标记stream已初始化
         self.recording = true;
         self.record_start_time = Some(std::time::Instant::now());
 
-        println!("Recording started");
+        println!("Recording started (stream initialized)");
         Ok(())
     }
 
@@ -180,9 +203,10 @@ impl AudioRecorder {
         println!("Stopping recording...");
         self.recording = false;
 
-        if let Some(stream) = self.stream.take() {
-            drop(stream);
-        }
+        // 🔥 优化：不要销毁stream，保持它打开以便下次复用
+        // if let Some(stream) = self.stream.take() {
+        //     drop(stream);
+        // }
 
         let duration = if let Some(start_time) = self.record_start_time {
             start_time.elapsed().as_secs_f64()
@@ -196,7 +220,8 @@ impl AudioRecorder {
         }
 
         // Get the actual audio data for saving
-        let (recorded_samples, audio_samples) = if let Some(audio_data_arc) = self.recording_audio_data.take() {
+        // 🔥 优化：不要take()，而是clone()，保留Arc以便下次使用
+        let (recorded_samples, audio_samples) = if let Some(ref audio_data_arc) = self.recording_audio_data {
             if let Ok(buffer) = audio_data_arc.lock() {
                 let sample_count = buffer.len();
                 let samples = buffer.clone();
@@ -310,9 +335,10 @@ impl AudioRecorder {
         println!("Stopping recording...");
         self.recording = false;
 
-        if let Some(stream) = self.stream.take() {
-            drop(stream);
-        }
+        // 🔥 优化：不要销毁stream，保持它打开以便下次复用
+        // if let Some(stream) = self.stream.take() {
+        //     drop(stream);
+        // }
 
         let duration = if let Some(start_time) = self.record_start_time {
             start_time.elapsed().as_secs_f64()
@@ -328,7 +354,8 @@ impl AudioRecorder {
         println!("Recording duration: {:.2}s, samples: {}", duration, self.audio_data.len());
 
         // Get the actual audio data from recording buffer
-        let (recorded_samples, audio_samples) = if let Some(audio_data_arc) = self.recording_audio_data.take() {
+        // 🔥 优化：不要take()，而是clone()，保留Arc以便下次使用
+        let (recorded_samples, audio_samples) = if let Some(ref audio_data_arc) = self.recording_audio_data {
             if let Ok(buffer) = audio_data_arc.lock() {
                 let sample_count = buffer.len();
                 let samples = buffer.clone();

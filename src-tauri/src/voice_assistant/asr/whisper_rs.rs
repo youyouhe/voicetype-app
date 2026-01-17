@@ -1,9 +1,10 @@
 use std::io::Cursor;
+use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use whisper_rs::{WhisperContext, FullParams, SamplingStrategy, WhisperContextParameters};
+use whisper_rs::{WhisperContext, FullParams, SamplingStrategy, WhisperContextParameters, WhisperState};
 use crate::voice_assistant::{AsrProcessor, Mode, VoiceError};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use serde_json;
 
 #[derive(Debug, Clone)]
@@ -872,6 +873,7 @@ struct TranscriptionResult {
 }
 
 /// Whisper 流式会话
+#[allow(dead_code)]
 pub struct WhisperStreamingSession {
     ctx: Arc<WhisperContext>,
     state: WhisperState,
@@ -897,6 +899,22 @@ pub struct WhisperStreamingSession {
     // 上下文管理
     context_tokens: Vec<i32>,
     max_context_tokens: usize,
+
+    // 🔥 方案3：待转录段落队列
+    pending_segments: Vec<PendingSegment>,
+
+    // 🔥 DEBUG: 调试计数器
+    debug_chunk_counter: u64,
+}
+
+/// 🔥 待转录的段落
+#[derive(Clone)]
+struct PendingSegment {
+    audio: Vec<f32>,
+    start_ms: u64,
+    end_ms: u64,
+    start_sample: usize,
+    end_sample: usize,
 }
 
 impl WhisperStreamingSession {
@@ -911,7 +929,7 @@ impl WhisperStreamingSession {
             state,
             mode,
             params,
-            vad_threshold: 0.5f32,
+            vad_threshold: 0.02f32,       // 🔥 降低阈值以适应低音量麦克风 (原0.5太高)
             min_speech_duration_ms: 1000,
             min_silence_duration_ms: 2000,
             max_segment_length_ms: 30000,
@@ -923,6 +941,8 @@ impl WhisperStreamingSession {
             last_transcribed_sample: 0,
             context_tokens: Vec::new(),
             max_context_tokens: 224, // Whisper 的上下文窗口
+            pending_segments: Vec::new(),  // 🔥 初始化待转录队列
+            debug_chunk_counter: 0,  // 🔥 调试用：音频块计数器
         })
     }
 
@@ -949,6 +969,9 @@ impl WhisperStreamingSession {
 
     /// 处理音频块
     pub fn process_audio_chunk(&mut self, audio_samples: &[f32], sample_rate: u32) -> Result<Vec<crate::voice_assistant::StreamingSegment>, VoiceError> {
+        // 🔥 调试：保存每个原始音频块
+        self.debug_save_audio_chunk(audio_samples, &format!("input_{}hz", sample_rate));
+
         // 1. 重采样到 16kHz
         let resampled = self.resample_to_16khz(audio_samples, sample_rate);
 
@@ -959,41 +982,108 @@ impl WhisperStreamingSession {
         // 3. 运行 VAD 检测语音段落
         let speech_segments = self.detect_vad_segments(start_idx)?;
 
-        // 4. 转录完成的段落
+        // 4. 🔥 方案3：智能转录策略 - 只在没有新语音时才转录
         let mut results = Vec::new();
 
         for segment in speech_segments {
             if segment.is_complete {
-                let segment_audio = &self.audio_buffer[segment.start_sample..segment.end_sample];
+                // 检查是否有新语音正在发生（最后500ms）
+                let has_recent_speech = self.check_recent_speech(500);
 
-                match self.transcribe_segment(segment_audio) {
+                if has_recent_speech {
+                    // 有新语音，将当前段落加入待转录队列
+                    println!("⏸️ VAD: New speech detected, queuing segment {}-{}ms for later transcription",
+                        segment.start_ms, segment.end_ms);
+
+                    let segment_audio: Vec<f32> = self.audio_buffer[segment.start_sample..segment.end_sample].to_vec();
+
+                    // 🔥 调试：保存队列中的VAD段落
+                    self.debug_save_audio_segment(&segment_audio, segment.start_ms, segment.end_ms, "queued");
+
+                    self.pending_segments.push(PendingSegment {
+                        audio: segment_audio,
+                        start_ms: segment.start_ms,
+                        end_ms: segment.end_ms,
+                        start_sample: segment.start_sample,
+                        end_sample: segment.end_sample,
+                    });
+                } else {
+                    // 没有新语音，可以安全转录
+                    println!("🎯 VAD: No new speech, transcribing segment {}-{}ms",
+                        segment.start_ms, segment.end_ms);
+
+                    // Copy audio segment to avoid borrow conflict
+                    let segment_audio: Vec<f32> = self.audio_buffer[segment.start_sample..segment.end_sample].to_vec();
+
+                    // 🔥 调试：保存立即转录的VAD段落
+                    self.debug_save_audio_segment(&segment_audio, segment.start_ms, segment.end_ms, "immediate");
+
+                    match self.transcribe_segment(&segment_audio) {
+                        Ok(transcription) => {
+                            if !transcription.text.is_empty() {
+                                // 更新上下文
+                                self.context_tokens.extend_from_slice(&transcription.tokens);
+                                if self.context_tokens.len() > self.max_context_tokens {
+                                    let keep = self.max_context_tokens / 2;
+                                    self.context_tokens = self.context_tokens[keep..].to_vec();
+                                }
+                                self.last_transcribed_sample = segment.end_sample;
+
+                                results.push(crate::voice_assistant::StreamingSegment {
+                                    text: transcription.text,
+                                    start_ms: segment.start_ms,
+                                    end_ms: segment.end_ms,
+                                    is_final: true,
+                                    should_type: true,
+                                });
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Segment transcription failed: {}", e);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 5. 🔥 尝试处理待转录队列（最多1个，避免阻塞）
+        if !self.pending_segments.is_empty() && !self.check_recent_speech(500) {
+            // 先取出待处理的段落（避免借用冲突）
+            let pending_to_process = self.pending_segments.drain(0..1).next();
+
+            if let Some(pending) = pending_to_process {
+                println!("🔄 VAD: Processing pending segment {}-{}ms", pending.start_ms, pending.end_ms);
+
+                // 🔥 调试：保存从队列中取出的VAD段落
+                self.debug_save_audio_segment(&pending.audio, pending.start_ms, pending.end_ms, "pending");
+
+                match self.transcribe_segment(&pending.audio) {
                     Ok(transcription) => {
                         if !transcription.text.is_empty() {
-                            // 更新上下文
                             self.context_tokens.extend_from_slice(&transcription.tokens);
                             if self.context_tokens.len() > self.max_context_tokens {
                                 let keep = self.max_context_tokens / 2;
                                 self.context_tokens = self.context_tokens[keep..].to_vec();
                             }
-                            self.last_transcribed_sample = segment.end_sample;
+                            self.last_transcribed_sample = pending.end_sample;
 
                             results.push(crate::voice_assistant::StreamingSegment {
                                 text: transcription.text,
-                                start_ms: segment.start_ms,
-                                end_ms: segment.end_ms,
+                                start_ms: pending.start_ms,
+                                end_ms: pending.end_ms,
                                 is_final: true,
                                 should_type: true,
                             });
                         }
                     }
                     Err(e) => {
-                        eprintln!("Segment transcription failed: {}", e);
+                        eprintln!("Pending segment transcription failed: {}", e);
                     }
                 }
             }
         }
 
-        // 5. 清理旧音频数据（保留最近 60 秒作为上下文）
+        // 6. 清理旧音频数据（保留最近 60 秒作为上下文）
         if self.audio_buffer.len() > self.sample_rate as usize * 60 {
             let keep_len = self.sample_rate as usize * 60;
             let remove_len = self.audio_buffer.len() - keep_len;
@@ -1005,6 +1095,132 @@ impl WhisperStreamingSession {
         }
 
         Ok(results)
+    }
+
+    /// 🔥 检查最近N毫秒是否有语音活动
+    fn check_recent_speech(&self, recent_ms: usize) -> bool {
+        let recent_samples = (self.sample_rate as usize * recent_ms / 1000).min(self.audio_buffer.len());
+
+        if self.audio_buffer.len() < recent_samples {
+            return false;
+        }
+
+        let start_idx = self.audio_buffer.len() - recent_samples;
+        let window_size = (self.sample_rate as f64 * 0.1) as usize; // 100ms窗口
+
+        // 检查最后几个窗口是否有高能量
+        let mut high_energy_count = 0;
+        let mut total_windows = 0;
+
+        for i in (start_idx..self.audio_buffer.len()).step_by(window_size / 2) {
+            if i + window_size > self.audio_buffer.len() {
+                break;
+            }
+
+            let window = &self.audio_buffer[i..i + window_size];
+            let energy = self.calculate_energy(window);
+            total_windows += 1;
+
+            if energy > self.vad_threshold {
+                high_energy_count += 1;
+            }
+        }
+
+        // 如果超过30%的窗口有高能量，认为有新语音
+        let has_speech = total_windows > 0 && (high_energy_count as f32 / total_windows as f32) > 0.3;
+
+        if has_speech {
+            println!("🔊 Recent speech check: {}/{} windows have high energy", high_energy_count, total_windows);
+        }
+
+        has_speech
+    }
+
+    /// 🔥 调试：保存原始音频块到日志目录
+    fn debug_save_audio_chunk(&mut self, audio: &[f32], label: &str) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+
+        let filename = format!("logs/streaming_debug/chunk_{timestamp}_{label}.wav");
+        self.debug_chunk_counter += 1;
+
+        // 创建debug目录
+        if let Err(e) = std::fs::create_dir_all("logs/streaming_debug") {
+            eprintln!("Failed to create debug directory: {}", e);
+            return;
+        }
+
+        // 写入WAV文件
+        if let Err(e) = self.write_wav_file(&filename, audio, 16000) {
+            eprintln!("Failed to save audio chunk: {}", e);
+        } else {
+            println!("💾 Saved audio chunk: {} ({} samples, label: {})", filename, audio.len(), label);
+        }
+    }
+
+    /// 🔥 调试：保存VAD检测到的语音段落到日志目录
+    fn debug_save_audio_segment(&self, audio: &[f32], start_ms: u64, end_ms: u64, label: &str) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+
+        let filename = format!("logs/streaming_debug/segment_{timestamp}_{start_ms}-{end_ms}ms_{label}.wav");
+
+        // 创建debug目录
+        if let Err(e) = std::fs::create_dir_all("logs/streaming_debug") {
+            eprintln!("Failed to create debug directory: {}", e);
+            return;
+        }
+
+        // 写入WAV文件
+        if let Err(e) = self.write_wav_file(&filename, audio, 16000) {
+            eprintln!("Failed to save audio segment: {}", e);
+        } else {
+            println!("💾 Saved VAD segment: {} ({} samples, {}ms)", filename, audio.len(), end_ms - start_ms);
+        }
+    }
+
+    /// 🔥 辅助：写入WAV文件
+    fn write_wav_file(&self, path: &str, audio: &[f32], sample_rate: u32) -> Result<(), std::io::Error> {
+        let mut file = std::fs::File::create(path)?;
+
+        // WAV header
+        let num_channels = 1u16;
+        let bits_per_sample = 16u16;
+        let byte_rate = sample_rate * num_channels as u32 * bits_per_sample as u32 / 8;
+        let block_align = num_channels * bits_per_sample / 8;
+        let data_size = audio.len() * 2;
+        let file_size = 36 + data_size as u32;
+
+        // RIFF header
+        file.write_all(b"RIFF")?;
+        file.write_all(&file_size.to_le_bytes())?;
+        file.write_all(b"WAVE")?;
+
+        // fmt chunk
+        file.write_all(b"fmt ")?;
+        file.write_all(&16u32.to_le_bytes())?; // chunk size
+        file.write_all(&1u16.to_le_bytes())?; // audio format (PCM)
+        file.write_all(&num_channels.to_le_bytes())?;
+        file.write_all(&sample_rate.to_le_bytes())?;
+        file.write_all(&byte_rate.to_le_bytes())?;
+        file.write_all(&block_align.to_le_bytes())?;
+        file.write_all(&bits_per_sample.to_le_bytes())?;
+
+        // data chunk
+        file.write_all(b"data")?;
+        file.write_all(&data_size.to_le_bytes())?;
+
+        // audio data (convert f32 [-1,1] to i16)
+        for &sample in audio {
+            let i16_sample = (sample.clamp(-1.0, 1.0) * 32767.0) as i16;
+            file.write_all(&i16_sample.to_le_bytes())?;
+        }
+
+        Ok(())
     }
 
     /// VAD 检测语音段落
@@ -1020,13 +1236,23 @@ impl WhisperStreamingSession {
         }
 
         let mut i = self.last_transcribed_sample;
+        let mut debug_count = 0;
+
         while i + window_size <= self.audio_buffer.len() {
             let window = &self.audio_buffer[i..i + window_size];
             let energy = self.calculate_energy(window);
 
+            // 每10个窗口打印一次调试信息
+            if debug_count % 10 == 0 {
+                println!("🎵 VAD: window[{}], energy={:.4}, threshold={:.4}, in_speech={}",
+                    debug_count, energy, self.vad_threshold, self.in_speech);
+            }
+            debug_count += 1;
+
             if energy > self.vad_threshold {
                 // 检测到语音
                 if !self.in_speech {
+                    println!("✅ VAD: Speech START detected at sample {} (energy={:.4})", i, energy);
                     self.in_speech = true;
                     self.speech_start_sample = i;
                 }
@@ -1044,6 +1270,9 @@ impl WhisperStreamingSession {
                             // 语音段落完成
                             let start_ms = (self.speech_start_sample as f64 / self.sample_rate as f64 * 1000.0) as u64;
                             let end_ms = (i as f64 / self.sample_rate as f64 * 1000.0) as u64;
+
+                            println!("✅ VAD: Segment COMPLETE: {}-{}ms (samples: {}-{})",
+                                start_ms, end_ms, self.speech_start_sample, i);
 
                             segments.push(VadSegmentInfo {
                                 start_sample: self.speech_start_sample,
@@ -1072,7 +1301,7 @@ impl WhisperStreamingSession {
             return 0.0;
         }
         let sum: f32 = samples.iter().map(|&x| x * x).sum();
-        (sum / samples.len() as f64).sqrt() as f32
+        (sum / samples.len() as f32).sqrt()
     }
 
     fn resample_to_16khz(&self, audio: &[f32], original_rate: u32) -> Vec<f32> {
@@ -1093,10 +1322,7 @@ impl WhisperStreamingSession {
     }
 
     fn transcribe_segment(&mut self, audio: &[f32]) -> Result<TranscriptionResult, VoiceError> {
-        // 重置状态
-        self.state.reset();
-
-        // 运行推理
+        // 运行推理 (WhisperState will be reused, each full() call starts fresh)
         self.state.full(self.params.clone(), audio)
             .map_err(|e| VoiceError::Other(format!("Whisper inference failed: {}", e)))?;
 
@@ -1105,7 +1331,7 @@ impl WhisperStreamingSession {
             .map_err(|e| VoiceError::Other(format!("Failed to get number of segments: {}", e)))?;
 
         let mut text = String::new();
-        let mut tokens = Vec::new();
+        let tokens = Vec::new();
 
         for i in 0..num_segments {
             let segment_text = self.state.full_get_segment_text(i)
@@ -1126,8 +1352,9 @@ impl WhisperStreamingSession {
     /// 结束会话（处理剩余音频）
     pub fn finalize(&mut self) -> Result<String, VoiceError> {
         if self.in_speech && self.audio_buffer.len() > self.speech_start_sample {
-            let remaining_audio = &self.audio_buffer[self.speech_start_sample..];
-            let result = self.transcribe_segment(remaining_audio)?;
+            // Copy audio to avoid borrow conflict
+            let remaining_audio: Vec<f32> = self.audio_buffer[self.speech_start_sample..].to_vec();
+            let result = self.transcribe_segment(&remaining_audio)?;
             Ok(result.text)
         } else {
             Ok(String::new())
