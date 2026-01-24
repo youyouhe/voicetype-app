@@ -1874,3 +1874,98 @@ pub async fn toggle_streaming_mode(
         Err(e) => Err(format!("Failed to toggle streaming mode: {}", e)),
     }
 }
+
+// ========== Post-process Configuration Commands ==========
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PostProcessConfigRequest {
+    pub enabled: bool,
+    pub provider: String,
+    pub endpoint: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub system_prompt: String,
+    pub timeout_seconds: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PostProcessConfigResponse {
+    pub enabled: bool,
+    pub provider: String,
+    pub endpoint: String,
+    pub api_key: Option<String>,
+    pub model: String,
+    pub system_prompt: String,
+    pub timeout_seconds: i64,
+    #[serde(default)]
+    pub allow_correction: bool,
+}
+
+#[tauri::command]
+pub async fn get_post_process_config(
+    state: State<'_, DatabaseState>,
+) -> Result<Option<PostProcessConfigResponse>, String> {
+    let db = {
+        let db_guard = state.lock().unwrap();
+        if let Some(ref db) = *db_guard {
+            db.clone()
+        } else {
+            return Err("Database not initialized".to_string());
+        }
+    };
+
+    match db.get_post_process_config().await {
+        Ok(Some(config)) => Ok(Some(PostProcessConfigResponse {
+            enabled: config.enabled,
+            provider: config.provider,
+            endpoint: config.endpoint,
+            api_key: config.api_key,
+            model: config.model,
+            system_prompt: config.system_prompt,
+            timeout_seconds: config.timeout_seconds,
+            allow_correction: config.allow_correction,
+        })),
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("Failed to get post-process config: {}", e)),
+    }
+}
+
+#[tauri::command]
+pub async fn save_post_process_config(
+    state: State<'_, DatabaseState>,
+    request: PostProcessConfigRequest,
+) -> Result<PostProcessConfigResponse, String> {
+    let db = {
+        let db_guard = state.lock().unwrap();
+        if let Some(ref db) = *db_guard {
+            db.clone()
+        } else {
+            return Err("Database not initialized".to_string());
+        }
+    };
+
+    match db.save_post_process_config(
+        request.enabled,
+        &request.provider,
+        &request.endpoint,
+        request.api_key.as_deref(),
+        &request.model,
+        &request.system_prompt,
+        request.timeout_seconds,
+    ).await {
+        Ok(config) => {
+            println!("✅ Post-process config saved: enabled={}, provider={}", config.enabled, config.provider);
+            Ok(PostProcessConfigResponse {
+                enabled: config.enabled,
+                provider: config.provider,
+                endpoint: config.endpoint,
+                api_key: config.api_key,
+                model: config.model,
+                system_prompt: config.system_prompt,
+                timeout_seconds: config.timeout_seconds,
+                allow_correction: config.allow_correction,
+            })
+        }
+        Err(e) => Err(format!("Failed to save post-process config: {}", e)),
+    }
+}

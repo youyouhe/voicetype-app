@@ -63,6 +63,42 @@ impl Default for StreamingConfig {
     }
 }
 
+// Post-process configuration structure for AI text correction
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct PostProcessConfig {
+    pub id: String,
+    pub enabled: bool,
+    pub provider: String,  // "ollama" or "deepseek"
+    pub endpoint: String,
+    pub api_key: Option<String>,  // API key for DeepSeek
+    pub model: String,
+    pub system_prompt: String,
+    pub timeout_seconds: i64,
+    #[serde(default)]
+    #[sqlx(default)]
+    pub allow_correction: bool,  // Legacy field - kept for DB compatibility but not used
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Default for PostProcessConfig {
+    fn default() -> Self {
+        Self {
+            id: String::new(),
+            enabled: false,
+            provider: "ollama".to_string(),
+            endpoint: "http://localhost:11434/api/chat".to_string(),
+            api_key: None,
+            model: "llama3.2:latest".to_string(),
+            system_prompt: "You are a text correction assistant. Fix grammar, spelling, and punctuation errors in the user input. Return only the corrected text without explanation.".to_string(),
+            timeout_seconds: 30,
+            allow_correction: true,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+}
+
 impl Default for TypingDelays {
     fn default() -> Self {
         Self {
@@ -436,6 +472,55 @@ impl Database {
         .execute(&*self.pool)
         .await
         .ok(); // Ignore error if no rows exist
+
+        // Create post_process_configs table for AI text correction
+        sqlx::query(
+            r#"
+            CREATE TABLE IF NOT EXISTS post_process_configs (
+                id TEXT PRIMARY KEY,
+                enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                provider TEXT NOT NULL DEFAULT 'ollama',
+                endpoint TEXT NOT NULL DEFAULT 'http://localhost:11434/api/chat',
+                api_key TEXT,
+                model TEXT NOT NULL DEFAULT 'llama3.2:latest',
+                system_prompt TEXT NOT NULL DEFAULT 'You are a text correction assistant. Fix grammar, spelling, and punctuation errors in the user input. Return only the corrected text without explanation.',
+                timeout_seconds INTEGER NOT NULL DEFAULT 30,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            "#,
+        )
+        .execute(&*self.pool)
+        .await?;
+
+        // Migration: Add provider and api_key columns if they don't exist
+        sqlx::query(
+            r#"
+            ALTER TABLE post_process_configs ADD COLUMN provider TEXT NOT NULL DEFAULT 'ollama'
+            "#
+        )
+        .execute(&*self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        sqlx::query(
+            r#"
+            ALTER TABLE post_process_configs ADD COLUMN api_key TEXT
+            "#
+        )
+        .execute(&*self.pool)
+        .await
+        .ok(); // Ignore error if column already exists
+
+        // Migration: Add allow_correction column if it doesn't exist (for DB compatibility)
+        sqlx::query(
+            r#"
+            ALTER TABLE post_process_configs ADD COLUMN IF NOT EXISTS allow_correction BOOLEAN NOT NULL DEFAULT TRUE
+            "#
+        )
+        .execute(&*self.pool)
+        .await
+        .ok();
 
         sqlx::query(
             r#"
@@ -1156,6 +1241,87 @@ impl Database {
             .await?;
 
             info!("Created new streaming config");
+            Ok(config)
+        }
+    }
+
+    // ========== Post-process Configuration methods ==========
+    pub async fn get_post_process_config(&self) -> Result<Option<PostProcessConfig>, sqlx::Error> {
+        let config = sqlx::query_as::<_, PostProcessConfig>(
+            "SELECT * FROM post_process_configs ORDER BY updated_at DESC LIMIT 1"
+        )
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        Ok(config)
+    }
+
+    pub async fn save_post_process_config(
+        &self,
+        enabled: bool,
+        provider: &str,
+        endpoint: &str,
+        api_key: Option<&str>,
+        model: &str,
+        system_prompt: &str,
+        timeout_seconds: i64,
+    ) -> Result<PostProcessConfig, sqlx::Error> {
+        let now = Utc::now();
+
+        // Try to update existing record first
+        let update_result = sqlx::query_as::<_, PostProcessConfig>(
+            r#"
+            UPDATE post_process_configs
+            SET enabled = $1,
+                provider = $2,
+                endpoint = $3,
+                api_key = $4,
+                model = $5,
+                system_prompt = $6,
+                timeout_seconds = $7,
+                updated_at = $8
+            WHERE id = (SELECT id FROM post_process_configs ORDER BY updated_at DESC LIMIT 1)
+            RETURNING *
+            "#
+        )
+        .bind(enabled)
+        .bind(provider)
+        .bind(endpoint)
+        .bind(api_key)
+        .bind(model)
+        .bind(system_prompt)
+        .bind(timeout_seconds)
+        .bind(now)
+        .fetch_optional(&*self.pool)
+        .await?;
+
+        if let Some(config) = update_result {
+            info!("Updated post-process config");
+            Ok(config)
+        } else {
+            // Insert new record
+            let id = Uuid::new_v4().to_string();
+            let config = sqlx::query_as::<_, PostProcessConfig>(
+                r#"
+                INSERT INTO post_process_configs (id, enabled, provider, endpoint, api_key, model, system_prompt, timeout_seconds, created_at, updated_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                RETURNING *
+                "#
+            )
+            .bind(&id)
+            .bind(enabled)
+            .bind(provider)
+            .bind(endpoint)
+            .bind(api_key)
+            .bind(model)
+            .bind(system_prompt)
+            .bind(timeout_seconds)
+            .bind(now)
+            .bind(now)
+            .fetch_one(&*self.pool)
+            .await?;
+
+            info!("Created new post-process config");
             Ok(config)
         }
     }

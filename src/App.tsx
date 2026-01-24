@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Mic, Settings, Languages } from 'lucide-react';
 import { AppStatus, HistoryItem } from './types';
 import { StatusIndicator } from './components/MainView/StatusCircle';
-import { VoiceAssistantPanel } from './components/MainView/VoiceAssistantPanel';
 import { Button } from './components/ui/Button';
 import { SettingsView } from './components/SettingsView';
 import { DashboardView } from './components/DashboardView';
@@ -16,7 +15,7 @@ const AppContent: React.FC = () => {
   const [appStatus, setAppStatus] = useState<AppStatus>(AppStatus.Idle);
   const [activeSettingsTab, setActiveSettingsTab] = useState('asr');
   const [isVoiceAssistantRunning, setIsVoiceAssistantRunning] = useState(false);
-  const [voiceAssistantState, setVoiceAssistantState] = useState<string>('Idle');
+  const [_voiceAssistantState, _setVoiceAssistantState] = useState<string>('Idle');
 
   // History State
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -149,7 +148,7 @@ const AppContent: React.FC = () => {
         console.log('🔍 Running check - equals Running:', cleanInitialState === 'Running');
         console.log('🔍 Running check - equals Recording:', cleanInitialState === 'Recording');
         setIsVoiceAssistantRunning(isInitiallyRunning);
-        setVoiceAssistantState(cleanInitialState);
+        _setVoiceAssistantState(cleanInitialState);
         setAppStatus(mapVoiceAssistantStateToAppStatus(cleanInitialState));
 
         // Set up event listener for state changes
@@ -168,7 +167,7 @@ const AppContent: React.FC = () => {
           console.log('🟢 Updated state:', newState);
 
           setIsVoiceAssistantRunning(isRunning);
-          setVoiceAssistantState(newState);
+          _setVoiceAssistantState(newState);
           setAppStatus(mapVoiceAssistantStateToAppStatus(newState));
         });
 
@@ -258,7 +257,7 @@ const AppContent: React.FC = () => {
 
           console.log('🟢 Actually running after start:', isActuallyRunning);
           setIsVoiceAssistantRunning(isActuallyRunning);
-          setVoiceAssistantState(cleanState);
+          _setVoiceAssistantState(cleanState);
           setAppStatus(mapVoiceAssistantStateToAppStatus(cleanState));
         } catch (error) {
           console.error('Failed to verify Voice Assistant state:', error);

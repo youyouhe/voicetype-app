@@ -10,6 +10,7 @@ interface ButtonProps {
   disabled?: boolean;
   loading?: boolean;
   className?: string;
+  title?: string;
 }
 
 export const Button: React.FC<ButtonProps> = ({
@@ -20,7 +21,8 @@ export const Button: React.FC<ButtonProps> = ({
   onClick,
   disabled = false,
   loading = false,
-  className = ''
+  className = '',
+  title
 }) => {
   const baseClasses = "inline-flex items-center justify-center font-medium rounded-lg transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-slate-900 select-none";
 
@@ -39,6 +41,7 @@ export const Button: React.FC<ButtonProps> = ({
 
   return (
     <button
+      title={title}
       className={`
         ${baseClasses}
         ${variantClasses[variant]}

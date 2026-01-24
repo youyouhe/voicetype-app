@@ -48,3 +48,10 @@ nul
 
 # Serena
 .serena/
+
+# Lock files (use npm)
+bun.lock
+
+# Build scripts - only root version should be committed
+src/build_package*.bat
+src/package-lock.json

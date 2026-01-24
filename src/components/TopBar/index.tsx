@@ -1,4 +1,4 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Mic, Settings } from 'lucide-react';
 import { AppStatus } from '../../types';
 import { StatusIndicator } from '../MainView/StatusCircle';

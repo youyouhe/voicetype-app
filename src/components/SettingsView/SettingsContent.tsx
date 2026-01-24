@@ -1,17 +1,16 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Server, Cloud, Globe, Wifi, Check, AlertTriangle, Save } from 'lucide-react';
+import { Server, Cloud, Globe, Check, AlertTriangle, Save } from 'lucide-react';
 import { ServiceProvider, ServiceOptionProps } from '../../types';
 import { Input, ToggleInput } from '../ui/Input';
 import { HotkeyInput } from '../ui/HotkeyInput';
 import { Button } from '../ui/Button';
 import { DatabaseService, AsrConfigRequest, StorageMigration } from '../../services/database';
-import { configManager } from '../../services/configManager';
 import { invoke } from '@tauri-apps/api/core';
-import { HotkeyConfig, HotkeyConfigRequest, TypingDelays } from '../../types';
+import { HotkeyConfig, HotkeyConfigRequest } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 // Service Option Component
-const ServiceOption: React.FC<ServiceOptionProps> = ({ id, title, description, icon, selected, onSelect, disabled = false }) => (
+const ServiceOption: React.FC<ServiceOptionProps> = ({ id: _id, title, description, icon, selected, onSelect, disabled = false }) => (
   <div
     onClick={disabled ? undefined : onSelect}
     className={`
@@ -86,14 +85,14 @@ export const ASRSettings: React.FC = () => {
   const [localApiKey, setLocalApiKey] = useState('');
   const [localEndpoint, setLocalEndpoint] = useState('http://localhost:5001/inference');
   const [cloudEndpoint, setCloudEndpoint] = useState('https://api.siliconflow.cn/v1/audio/transcriptions');
-  const [isTesting, setIsTesting] = useState(false);
-  const [status, setStatus] = useState<'idle' | 'success' | 'failed'>('idle');
-  const [testResult, setTestResult] = useState<'idle' | 'success' | 'failed'>('idle');
-  const [testMessage, setTestMessage] = useState<string>('');
+  const [isTesting, _setIsTesting] = useState(false);
+  const [status, _setStatus] = useState<'idle' | 'success' | 'failed'>('idle');
+  const [_testResult, _setTestResult] = useState<'idle' | 'success' | 'failed'>('idle');
+  const [_testMessage, _setTestMessage] = useState<string>('');
 
   // Health check state
   const [healthStatus, setHealthStatus] = useState<'idle' | 'checking' | 'healthy' | 'unhealthy'>('idle');
-  const [healthMessage, setHealthMessage] = useState<string>('');
+  const [_healthMessage, _setHealthMessage] = useState<string>('');
 
   // ASR test state
   const [isTestingAsr, setIsTestingAsr] = useState(false);
@@ -128,7 +127,7 @@ export const ASRSettings: React.FC = () => {
     // Check if we're in Tauri environment
     if (!isTauriEnvironment()) {
       setHealthStatus('unhealthy');
-      setHealthMessage('Tauri environment required');
+      _setHealthMessage('Tauri environment required');
       addDebugLog('⚠️ Health check not available in browser');
       return;
     }
@@ -158,16 +157,16 @@ export const ASRSettings: React.FC = () => {
 
       if (response.success) {
         setHealthStatus('healthy');
-        setHealthMessage(response.message + (response.backend_count ? ` (${response.backend_count} backends)` : ''));
+        _setHealthMessage(response.message + (response.backend_count ? ` (${response.backend_count} backends)` : ''));
         addDebugLog('✅ Health check passed: ' + response.message);
       } else {
         setHealthStatus('unhealthy');
-        setHealthMessage(response.message);
+        _setHealthMessage(response.message);
         addDebugLog('❌ Health check failed: ' + response.message);
       }
     } catch (error) {
       setHealthStatus('unhealthy');
-      setHealthMessage('Connection failed');
+      _setHealthMessage('Connection failed');
       addDebugLog('💥 Health check error: ' + String(error));
       addDebugLog('🔍 Error type: ' + typeof error);
       addDebugLog('🔍 Error details: ' + JSON.stringify(error, null, 2));
@@ -405,15 +404,12 @@ export const ASRSettings: React.FC = () => {
     setApiKey(value);
   }, []);
 
-  const handleLocalApiKeyChange = useCallback((value: string) => {
-    setLocalApiKey(value);
-  }, []);
-
   const handleCloudEndpointChange = useCallback((value: string) => {
     setCloudEndpoint(value);
   }, []);
 
-  const handleLocalEndpointChange = useCallback((value: string) => {
+  // @ts-expect-error - Handler kept for potential future use
+  const _handleLocalEndpointChange = useCallback((value: string) => {
     setLocalEndpoint(value);
   }, []);
 
@@ -926,11 +922,11 @@ export const ShortcutSettings: React.FC = () => {
                 anti_mistouch_enabled: antiTouch,
                 save_wav_files: saveWavFiles,
                 typing_delays: {
-                    clipboard_update_ms: existingConfig?.clipboard_update_ms ?? 100,
-                    keyboard_events_settle_ms: existingConfig?.keyboard_events_settle_ms ?? 300,
-                    typing_complete_ms: existingConfig?.typing_complete_ms ?? 500,
-                    character_interval_ms: existingConfig?.character_interval_ms ?? 100,
-                    short_operation_ms: existingConfig?.short_operation_ms ?? 100,
+                    clipboard_update_ms: existingConfig?.typing_delays?.clipboard_update_ms ?? 100,
+                    keyboard_events_settle_ms: existingConfig?.typing_delays?.keyboard_events_settle_ms ?? 300,
+                    typing_complete_ms: existingConfig?.typing_delays?.typing_complete_ms ?? 500,
+                    character_interval_ms: existingConfig?.typing_delays?.character_interval_ms ?? 100,
+                    short_operation_ms: existingConfig?.typing_delays?.short_operation_ms ?? 100,
                 }, // Preserve existing delays from Advanced settings
             };
 

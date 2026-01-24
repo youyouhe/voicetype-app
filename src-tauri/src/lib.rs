@@ -115,7 +115,8 @@ use commands::{
     get_service_status, get_latency_data, get_usage_data,
     handle_asr_result,
     scan_whisper_models, set_active_whisper_model, get_active_whisper_model,
-    get_streaming_config, save_streaming_config, toggle_streaming_mode
+    get_streaming_config, save_streaming_config, toggle_streaming_mode,
+    get_post_process_config, save_post_process_config
 };
 
 // Import global whisper manager commands
@@ -302,7 +303,10 @@ pub fn run() {
             // Streaming configuration commands
             get_streaming_config,
             save_streaming_config,
-            toggle_streaming_mode
+            toggle_streaming_mode,
+            // Post-process configuration commands
+            get_post_process_config,
+            save_post_process_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

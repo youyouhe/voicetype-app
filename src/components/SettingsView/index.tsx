@@ -1,7 +1,7 @@
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Mic, Keyboard, Sliders, Monitor, Download, Waves } from 'lucide-react';
 import { NavTab } from '../../types';
-import { ASRSettings, ShortcutSettings, PlaceholderSettings } from './SettingsContent';
+import { ASRSettings, ShortcutSettings } from './SettingsContent';
 import { AdvancedSettings } from './AdvancedSettings';
 import { SystemInfoSettings } from './SystemInfoSettings';
 import { ModelDownload } from './ModelDownload';

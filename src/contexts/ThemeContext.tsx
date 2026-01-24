@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { StorageService } from '../services/storageService';
 
 export type Theme = 'light' | 'dark';
 

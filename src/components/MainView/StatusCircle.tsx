@@ -1,5 +1,5 @@
 import React from 'react';
-import { Mic, Activity, CheckCircle, AlertCircle, XCircle, Languages, Loader } from 'lucide-react';
+import { Mic, XCircle, Languages, Loader } from 'lucide-react';
 import { AppStatus } from '../../types';
 
 interface StatusCircleProps {

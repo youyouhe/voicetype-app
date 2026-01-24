@@ -13,6 +13,7 @@ interface InputProps {
   max?: number;
   step?: number;
   unit?: string;
+  autoFocus?: boolean;
 }
 
 export const Input: React.FC<InputProps> = ({
@@ -27,7 +28,8 @@ export const Input: React.FC<InputProps> = ({
   min,
   max,
   step,
-  unit
+  unit,
+  autoFocus
 }) => {
   return (
     <div className="space-y-1.5">
@@ -46,6 +48,7 @@ export const Input: React.FC<InputProps> = ({
           min={min}
           max={max}
           step={step}
+          autoFocus={autoFocus}
           className={`
             w-full px-3 py-2.5 border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 transition-shadow duration-200
             ${error ? 'border-red-500 focus:ring-red-200' : 'border-gray-300'}
@@ -71,17 +74,19 @@ export const ToggleInput: React.FC<{
   checked: boolean;
   onChange: (checked: boolean) => void;
   description?: string;
-}> = ({ label, checked, onChange, description }) => (
+  disabled?: boolean;
+}> = ({ label, checked, onChange, description, disabled = false }) => (
   <div className="flex items-center justify-between py-2">
     <div>
       <h4 className="text-sm font-medium text-gray-900">{label}</h4>
       {description && <p className="text-xs text-gray-500 mt-1">{description}</p>}
     </div>
     <button
-      onClick={() => onChange(!checked)}
+      onClick={() => !disabled && onChange(!checked)}
       className={`
-        relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
+        relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2
         ${checked ? 'bg-primary-600' : 'bg-gray-200'}
+        ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
       `}
     >
       <span

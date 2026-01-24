@@ -55,6 +55,18 @@ export interface StreamingConfig {
   max_segment_length_ms: number;
 }
 
+// Post-process Configuration Types (Ollama text correction)
+export interface PostProcessConfig {
+  enabled: boolean;
+  provider: string;  // "ollama" | "deepseek"
+  endpoint: string;
+  api_key?: string;  // API key for DeepSeek
+  model: string;
+  system_prompt: string;
+  timeout_seconds: number;
+  allow_correction?: boolean;  // Legacy field - kept for DB compatibility but not used
+}
+
 // Voice Assistant Service
 export class TauriService {
   // Voice Assistant Control
@@ -168,6 +180,20 @@ export class TauriService {
 
   static async toggleStreamingMode(enabled: boolean): Promise<boolean> {
     return await invoke<boolean>('toggle_streaming_mode', { enabled });
+  }
+
+  // Post-processing configuration methods (Ollama text correction)
+  static async getPostProcessConfig(): Promise<PostProcessConfig | null> {
+    return await invoke<PostProcessConfig | null>('get_post_process_config');
+  }
+
+  static async savePostProcessConfig(config: PostProcessConfig): Promise<PostProcessConfig> {
+    // Convert empty string api_key to undefined/null for proper serialization
+    const request = {
+      ...config,
+      api_key: config.api_key && config.api_key.trim() !== '' ? config.api_key : undefined,
+    };
+    return await invoke<PostProcessConfig>('save_post_process_config', { request });
   }
 }
 

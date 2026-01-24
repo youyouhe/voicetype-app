@@ -5,6 +5,7 @@ pub mod logger;
 pub mod asr;
 pub mod global_whisper;
 pub mod translate;
+pub mod post_process;
 pub mod coordinator;
 pub mod hotkey_parser;
 // pub mod system_tray;

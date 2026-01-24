@@ -15,7 +15,7 @@ const defaultStreamingConfig: StreamingConfig = {
 };
 
 export const StreamingSettings: React.FC = () => {
-  const { t } = useLanguage();
+  const { t: _t } = useLanguage();
   const [config, setConfig] = useState<StreamingConfig>(defaultStreamingConfig);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -134,6 +134,7 @@ export const StreamingSettings: React.FC = () => {
             </div>
           </div>
           <ToggleInput
+            label=""
             checked={config.enabled}
             onChange={handleToggleStreaming}
             disabled={isSaving}

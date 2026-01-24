@@ -243,6 +243,27 @@ export interface Translations {
   tauriDesktop: string;
   browser: string;
   debugRefresh: string;
+
+  // Post-process / Text Correction Settings
+  postProcessTextCorrection: string;
+  postProcessTextCorrectionDesc: string;
+  postProcessEnabled: string;
+  postProcessEnabledDesc: string;
+  postProcessProvider: string;
+  postProcessProviderOllama: string;
+  postProcessProviderDeepSeek: string;
+  postProcessEndpoint: string;
+  postProcessEndpointPlaceholder: string;
+  postProcessModel: string;
+  postProcessModelPlaceholder: string;
+  postProcessSystemPrompt: string;
+  postProcessSystemPromptPlaceholder: string;
+  postProcessTimeout: string;
+  postProcessTimeoutSeconds: string;
+  postProcessInfoBox: string;
+  postProcessAutoSaved: string;
+  postProcessApiKey: string;
+  postProcessApiKeyPlaceholder: string;
 }
 
 export const translations: Record<string, Translations> = {
@@ -478,6 +499,27 @@ export const translations: Record<string, Translations> = {
     tauriDesktop: 'Tauri 桌面应用',
     browser: '浏览器',
     debugRefresh: '🔄 调试刷新',
+
+    // Post-process / Text Correction Settings
+    postProcessTextCorrection: 'AI 文本校正',
+    postProcessTextCorrectionDesc: 'ASR 完成后使用 AI 模型修正文本错误',
+    postProcessEnabled: '启用文本校正',
+    postProcessEnabledDesc: '使用 AI 模型在输出前修正 ASR 识别的文本错误',
+    postProcessProvider: '提供商',
+    postProcessProviderOllama: 'Ollama (本地)',
+    postProcessProviderDeepSeek: 'DeepSeek (云端)',
+    postProcessEndpoint: 'API 端点',
+    postProcessEndpointPlaceholder: 'http://localhost:11434/api/chat',
+    postProcessModel: '模型名称',
+    postProcessModelPlaceholder: 'llama3.2:latest 或 deepseek-chat',
+    postProcessSystemPrompt: '系统提示词',
+    postProcessSystemPromptPlaceholder: 'You are a text correction assistant. Fix grammar, spelling, and punctuation errors in the user input. Return only the corrected text without explanation.',
+    postProcessTimeout: '超时时间',
+    postProcessTimeoutSeconds: '秒',
+    postProcessInfoBox: '提示：需要确保 AI 服务正在运行。文本校正会增加 1-3 秒的延迟，建议使用轻量级模型以获得更快响应。',
+    postProcessAutoSaved: '配置更改将自动保存到数据库。',
+    postProcessApiKey: 'API 密钥',
+    postProcessApiKeyPlaceholder: 'sk-...',
   },
   'en-US': {
     appName: 'VoiceType',
@@ -711,6 +753,27 @@ export const translations: Record<string, Translations> = {
     tauriDesktop: 'Tauri Desktop',
     browser: 'Browser',
     debugRefresh: '🔄 Debug Refresh',
+
+    // Post-process / Text Correction Settings
+    postProcessTextCorrection: 'AI Text Correction',
+    postProcessTextCorrectionDesc: 'Use AI model to fix ASR text errors after processing',
+    postProcessEnabled: 'Enable Text Correction',
+    postProcessEnabledDesc: 'Use AI model to correct ASR text before output',
+    postProcessProvider: 'Provider',
+    postProcessProviderOllama: 'Ollama (Local)',
+    postProcessProviderDeepSeek: 'DeepSeek (Cloud)',
+    postProcessEndpoint: 'API Endpoint',
+    postProcessEndpointPlaceholder: 'http://localhost:11434/api/chat',
+    postProcessModel: 'Model Name',
+    postProcessModelPlaceholder: 'llama3.2:latest or deepseek-chat',
+    postProcessSystemPrompt: 'System Prompt',
+    postProcessSystemPromptPlaceholder: 'You are a text correction assistant. Fix grammar, spelling, and punctuation errors in the user input. Return only the corrected text without explanation.',
+    postProcessTimeout: 'Timeout',
+    postProcessTimeoutSeconds: 'seconds',
+    postProcessInfoBox: 'Note: Make sure the AI service is running. Text correction adds 1-3 seconds of latency. Lightweight models are recommended for faster response.',
+    postProcessAutoSaved: 'Configuration changes will be saved automatically.',
+    postProcessApiKey: 'API Key',
+    postProcessApiKeyPlaceholder: 'sk-...',
   },
 };
 

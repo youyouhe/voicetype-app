@@ -59,6 +59,7 @@ export interface HotkeyConfig {
   trigger_delay_ms: number;
   anti_mistouch_enabled: boolean;
   save_wav_files: boolean;
+  typing_delays?: TypingDelays;
   created_at: string;
   updated_at: string;
 }
@@ -78,4 +79,16 @@ export interface HotkeyConfigRequest {
   anti_mistouch_enabled: boolean;
   save_wav_files: boolean;
   typing_delays: TypingDelays;
+}
+
+// Post-process Configuration Types (Ollama text correction)
+export interface PostProcessConfig {
+  enabled: boolean;
+  provider: string;  // "ollama" | "deepseek"
+  endpoint: string;
+  api_key?: string;  // API key for DeepSeek
+  model: string;
+  system_prompt: string;
+  timeout_seconds: number;
+  allow_correction?: boolean;  // Legacy field - kept for DB compatibility but not used
 }

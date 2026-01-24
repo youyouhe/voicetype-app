@@ -30,15 +30,16 @@ echo ========================================
 echo.
 
 REM Get project root directory (where this script is located)
-set PROJECT_ROOT=%~dp0
-set PROJECT_ROOT=%PROJECT_ROOT:~0,-1%
+pushd "%~dp0"
+set PROJECT_ROOT=%CD%
+popd
 
 echo Project Root: %PROJECT_ROOT%
 
-if %CLEAN_DEPS%==1 (
+if "%CLEAN_DEPS%"=="1" (
     echo %WARNING% Clean mode: will reinstall all dependencies
 )
-if %SKIP_DEPS_CHECK%==1 (
+if "%SKIP_DEPS_CHECK%"=="1" (
     echo %WARNING% Skipping dependency check
 )
 echo.
@@ -153,7 +154,7 @@ REM ========================================
 REM Step 0: Install/Repair Dependencies
 REM ========================================
 echo [0/6] Checking and installing dependencies...
-cd /d "%PROJECT_ROOT%\src"
+cd /d "%PROJECT_ROOT%"
 
 REM Clean mode: remove everything and reinstall
 if %CLEAN_DEPS%==1 (
@@ -181,9 +182,9 @@ if not exist "node_modules\d3-format" (
     set "MISSING_DEPS=1"
     echo %WARNING% d3-format is missing
 )
-if not exist "node_modules\react" (
+if not exist "node_modules\@tauri-apps" (
     set "MISSING_DEPS=1"
-    echo %WARNING% react is missing
+    echo %WARNING% @tauri-apps is missing
 )
 if not exist "node_modules\vite" (
     set "MISSING_DEPS=1"
@@ -235,6 +236,16 @@ REM Step 1: Copy CUDA DLLs
 REM ========================================
 echo [1/6] Copying CUDA 11.8 DLLs...
 set CUDA_DLL_DIR=%PROJECT_ROOT%\src-tauri\resources\cuda
+
+REM Check if CUDA DLLs already exist
+if exist "%CUDA_DLL_DIR%\cublas64_11.dll" (
+    echo %INFO% CUDA DLLs already exist, skipping copy...
+    dir "%CUDA_DLL_DIR%" /B
+    echo.
+    goto skip_cuda_copy
+)
+
+echo %INFO% CUDA DLLs not found, copying...
 if exist "%CUDA_DLL_DIR%" rd /s /q "%CUDA_DLL_DIR%"
 mkdir "%CUDA_DLL_DIR%"
 
@@ -245,13 +256,15 @@ copy /Y "%CUDA_PATH%\bin\cufft64_*.dll" "%CUDA_DLL_DIR%\" >nul 2>&1
 
 echo %SUCCESS% Copied CUDA 11.8 DLLs to: %CUDA_DLL_DIR%
 dir "%CUDA_DLL_DIR%" /B
+
+:skip_cuda_copy
 echo.
 
 REM ========================================
 REM Step 2: Build Frontend
 REM ========================================
 echo [2/6] Building frontend...
-cd /d "%PROJECT_ROOT%\src"
+cd /d "%PROJECT_ROOT%"
 call npm run build
 if %ERRORLEVEL% NEQ 0 (
     call :frontend_build_failed
@@ -325,7 +338,7 @@ for %%f in (%PROJECT_ROOT%\src-tauri\resources\cuda\*.dll) do (
 )
 
 REM Create README
-echo VoiceType v0.2.0 (CUDA 11.8 Edition) > "%PORTABLE_DIR%\README.txt"
+echo VoiceType v0.2.2 (CUDA 11.8 Edition) > "%PORTABLE_DIR%\README.txt"
 echo. >> "%PORTABLE_DIR%\README.txt"
 echo AI Voice Assistant with CUDA-accelerated Whisper support >> "%PORTABLE_DIR%\README.txt"
 echo. >> "%PORTABLE_DIR%\README.txt"

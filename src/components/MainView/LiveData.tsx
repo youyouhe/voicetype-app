@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Server, Zap, BarChart3, ArrowUpRight, AlertCircle } from 'lucide-react';
-import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
-import { TauriService } from '../../services/tauriService';
+import { AreaChart, Area, ResponsiveContainer } from 'recharts';
+import { TauriService, ServiceStatus, LatencyData, UsageData } from '../../services/tauriService';
 import { useLanguage } from '../../contexts/LanguageContext';
 
 interface InfoCardProps {
@@ -42,9 +42,9 @@ const InfoCard: React.FC<InfoCardProps> = ({ icon, title, value, subValue, chart
 
 export const LiveData: React.FC = () => {
   const { t } = useLanguage();
-  const [serviceStatus, setServiceStatus] = useState<TauriService.ServiceStatus | null>(null);
-  const [latencyData, setLatencyData] = useState<TauriService.LatencyData | null>(null);
-  const [usageData, setUsageData] = useState<TauriService.UsageData | null>(null);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(null);
+  const [latencyData, setLatencyData] = useState<LatencyData | null>(null);
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -100,8 +100,8 @@ export const LiveData: React.FC = () => {
         });
 
         // Listen for ASR result events (just for refresh, no need to save)
-        const unlistenAsrResult = await listen('asr-result-complete', (result) => {
-          console.log('🎯 [Frontend] ASR result event received, refreshing data:', result.output_text);
+        const unlistenAsrResult = await listen('asr-result-complete', (event: { payload: { output_text?: string } }) => {
+          console.log('🎯 [Frontend] ASR result event received, refreshing data:', event.payload.output_text);
           // Data is automatically saved by backend, just refresh display
           fetchLiveData();
         });
@@ -137,7 +137,7 @@ export const LiveData: React.FC = () => {
     }
   };
 
-  const getTrendIcon = (trend: 'up' | 'down' | 'neutral', value: number) => {
+  const getTrendIcon = (trend: 'up' | 'down' | 'neutral', _value: number) => {
     if (trend === 'up') {
       return <ArrowUpRight className="w-3 h-3 mr-0.5 text-green-500" />;
     } else if (trend === 'down') {

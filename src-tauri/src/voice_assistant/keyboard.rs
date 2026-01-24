@@ -397,33 +397,113 @@ impl KeyboardManager {
 
                             // Use the ASR result
                             if let Some(result_text) = asr_result {
-                                println!("⌨️ Typing ASR result: \"{}\"", result_text);
-                                
+                                println!("⌨️ Original ASR result: \"{}\"", result_text);
+
                                 // Calculate processing time
                                 let processing_time = if let Some(start_time) = hotkey_start_time.lock().unwrap().as_ref() {
                                     Some(start_time.elapsed().as_millis() as i64)
                                 } else {
                                     None
                                 };
-                                
-                                // Use tokio runtime to save to database
-                                if let Ok(tokio_rt) = tokio::runtime::Runtime::new() {
+
+                                // Use tokio runtime for database save and optional text correction
+                                let final_text = if let Ok(tokio_rt) = tokio::runtime::Runtime::new() {
                                     let result_text_clone = result_text.clone();
                                     let processor_type = _asr_processor.get_processor_type().unwrap_or("unknown").to_string();
+
+                                    // Save to database and potentially correct text
                                     tokio_rt.block_on(async move {
+                                        // Save ASR result to database
                                         crate::voice_assistant::coordinator::save_asr_result_directly(
-                                            result_text_clone,
+                                            result_text_clone.clone(),
                                             &processor_type,
                                             processing_time,
                                             true,
                                             None
                                         ).await;
-                                    });
-                                    
-                                    println!("✅ Database save operation completed");
-                                }
-                                
-                                Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &result_text, None, &typing_delays_for_callback.lock().unwrap());
+                                        println!("✅ Database save operation completed");
+
+                                        // Check if post-processing is enabled
+                                        if let Ok(db) = crate::database::Database::from_global_pool().await {
+                                            if let Ok(Some(config)) = db.get_post_process_config().await {
+                                                if config.enabled {
+                                                    println!("🔧 Post-processing enabled with provider: {}", config.provider);
+
+                                                    let corrected = match config.provider.as_str() {
+                                                        "deepseek" => {
+                                                            // DeepSeek requires API key
+                                                            let api_key = config.api_key
+                                                                .unwrap_or_default();
+                                                            if api_key.is_empty() {
+                                                                println!("⚠️ DeepSeek API key not set, using original text");
+                                                                result_text_clone.clone()
+                                                            } else {
+                                                                match crate::voice_assistant::post_process::DeepSeekPostProcessor::new(
+                                                                    config.endpoint,
+                                                                    api_key,
+                                                                    config.model,
+                                                                    config.system_prompt,
+                                                                    config.timeout_seconds,
+                                                                ) {
+                                                                    Ok(processor) => {
+                                                                        match processor.correct_text(&result_text_clone) {
+                                                                            Ok(corrected) => {
+                                                                                println!("✅ Text corrected by DeepSeek: \"{}\"", corrected);
+                                                                                return corrected;
+                                                                            }
+                                                                            Err(e) => {
+                                                                                println!("⚠️ DeepSeek correction failed: {}, using original text", e);
+                                                                                result_text_clone.clone()
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                    Err(e) => {
+                                                                        println!("⚠️ Failed to create DeepSeek processor: {}, using original text", e);
+                                                                        result_text_clone.clone()
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                        "ollama" | _ => {
+                                                            match crate::voice_assistant::post_process::OllamaPostProcessor::new(
+                                                                config.endpoint,
+                                                                config.model,
+                                                                config.system_prompt,
+                                                                config.timeout_seconds,
+                                                            ) {
+                                                                Ok(processor) => {
+                                                                    match processor.correct_text(&result_text_clone) {
+                                                                        Ok(corrected) => {
+                                                                            println!("✅ Text corrected by Ollama: \"{}\"", corrected);
+                                                                            return corrected;
+                                                                        }
+                                                                        Err(e) => {
+                                                                            println!("⚠️ Ollama correction failed: {}, using original text", e);
+                                                                            result_text_clone.clone()
+                                                                        }
+                                                                    }
+                                                                }
+                                                                Err(e) => {
+                                                                    println!("⚠️ Failed to create Ollama processor: {}, using original text", e);
+                                                                    result_text_clone.clone()
+                                                                }
+                                                            }
+                                                        }
+                                                    };
+
+                                                    return corrected;
+                                                } else {
+                                                    println!("ℹ️ Post-processing disabled, using original text");
+                                                }
+                                            }
+                                        }
+                                        result_text_clone
+                                    })
+                                } else {
+                                    result_text.clone()
+                                };
+
+                                Self::type_text_internal(&state, &temp_text_length, &original_clipboard, &final_text, None, &typing_delays_for_callback.lock().unwrap());
                                 println!("✅ ASR result typing completed");
                             }
 

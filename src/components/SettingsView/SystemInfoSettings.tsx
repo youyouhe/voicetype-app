@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Monitor, Cpu, HardDrive, Wifi, Zap, RefreshCw } from 'lucide-react';
+import { Monitor, Cpu, HardDrive, Zap, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/Button';
 import { TauriService } from '../../services/tauriService';
 import { useLanguage } from '../../contexts/LanguageContext';

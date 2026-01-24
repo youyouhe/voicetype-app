@@ -1,4 +1,4 @@
-import React, { memo, useState, useEffect } from 'react';
+import { memo, useState, useEffect } from 'react';
 import { FileText, Languages, Clock, Save, Trash2 } from 'lucide-react';
 import { AppStatus, HistoryItem, HotkeyConfig } from '../../types';
 import { StatusCircle } from '../MainView/StatusCircle';
@@ -25,8 +25,8 @@ export const DashboardView = memo<DashboardViewProps>(({
   lastSaved,
   startRecording,
   handleClearHistory,
-  startVoiceAssistant,
-  stopVoiceAssistant,
+  startVoiceAssistant: _startVoiceAssistant,
+  stopVoiceAssistant: _stopVoiceAssistant,
   isVoiceAssistantRunning
 }) => {
   const { t } = useLanguage();

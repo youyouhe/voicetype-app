@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { Button } from '../ui/Button';
 import { TauriService } from '../../services/tauriService';
 import type { HotkeyConfig } from '../../types';
 import { useLanguage } from '../../contexts/LanguageContext';
@@ -14,7 +13,7 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
   onStatusChange
 }) => {
   const { t } = useLanguage();
-  const [internalIsRunning, setInternalIsRunning] = useState(false);
+  const [internalIsRunning, _setInternalIsRunning] = useState(false);
   const [hotkeyConfig, setHotkeyConfig] = useState<HotkeyConfig | null>(null);
 
   // Use external state if provided, otherwise use internal state
@@ -35,21 +34,13 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
     fetchHotkeyConfig();
   }, []);
 
-  // Update internal state only if we don't have external control
-  const setIsRunning = (running: boolean) => {
-    if (onStatusChange) {
-      onStatusChange(running);
-    } else {
-      setInternalIsRunning(running);
-    }
-  };
-
   // Debug logging
   console.log('🎤 VoiceAssistantPanel - externalIsRunning:', externalIsRunning);
   console.log('🎤 VoiceAssistantPanel - final isRunning:', isRunning);
-  
 
-  const startVoiceAssistant = async () => {
+  // Helper functions (currently unused, kept for future use)
+  // @ts-expect-error - Function kept for potential future use
+  const _startVoiceAssistant = async () => {
     try {
       console.log('🎤 VoiceAssistantPanel starting Voice Assistant...');
       const result = await TauriService.startVoiceAssistant();
@@ -87,7 +78,9 @@ export const VoiceAssistantPanel: React.FC<VoiceAssistantPanelProps> = ({
     }
   };
 
-  const stopVoiceAssistant = async () => {
+  // Helper function (currently unused, kept for future use)
+  // @ts-expect-error - Function kept for potential future use
+  const _stopVoiceAssistant = async () => {
     try {
       console.log('🎤 VoiceAssistantPanel stopping Voice Assistant...');
       const result = await TauriService.stopVoiceAssistant();

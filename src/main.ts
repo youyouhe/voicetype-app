@@ -30,7 +30,7 @@ async function startVoiceAssistant() {
 
     if (result.includes('success')) {
       appState.isRunning = true;
-      updateStatus('running', '语音助手已启动');
+      updateStatus('idle', '语音助手已启动');
       updateControlButtons();
       addTestResult('✅ ' + result, 'success');
     } else {
@@ -58,7 +58,8 @@ async function stopVoiceAssistant() {
   }
 }
 
-async function getVoiceAssistantState() {
+// @ts-expect-error - Function kept for potential future use
+async function _getVoiceAssistantState() {
   try {
     const state = await invoke<string>("get_voice_assistant_state");
     return state;
@@ -213,10 +214,11 @@ function setupTabs() {
 // Legacy functions (keep for compatibility)
 let greetInputEl: HTMLInputElement | null;
 let greetMsgEl: HTMLElement | null;
-let input1: HTMLElement | null;
-let input2: HTMLElement | null;
+let input1: HTMLInputElement | null;
+let input2: HTMLInputElement | null;
 
-async function greet() {
+// @ts-expect-error - Legacy function kept for compatibility
+async function _greet() {
   if (greetMsgEl && greetInputEl) {
     greetMsgEl.textContent = await invoke("greet", {
       name: greetInputEl.value,
@@ -225,7 +227,7 @@ async function greet() {
 }
 
 async function add() {
-  if (input1 && input2) {
+  if (input1 && input2 && greetMsgEl) {
     greetMsgEl.textContent = await invoke("add", {
       a: Number(input1.value),
       b: Number(input2.value)
